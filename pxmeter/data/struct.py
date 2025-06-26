@@ -432,6 +432,38 @@ class Structure:
             chain_id_to_entity_id[chain_id] = entity_id
         return chain_id_to_entity_id
 
+    def get_ligand_polymer_bonds(self) -> np.ndarray:
+        """
+        Get bonds between the bonded ligand and its parent chain.
+
+        Returns:
+            np.ndarray: bond records between the bonded ligand and its parent chain.
+                        e.g. np.array([[atom1, atom2, bond_order]...])
+        """
+        atom_array = self.atom_array
+        bond_array = atom_array.bonds.as_array()
+
+        polymer_mask = np.isin(
+            atom_array.label_entity_id, list(self.entity_poly_type.keys())
+        )
+
+        lig_mask = ~polymer_mask
+
+        idx_i = bond_array[:, 0]
+        idx_j = bond_array[:, 1]
+
+        lig_polymer_bond_indices = np.where(
+            (lig_mask[idx_i] & polymer_mask[idx_j])
+            | (lig_mask[idx_j] & polymer_mask[idx_i])
+        )[0]
+        if lig_polymer_bond_indices.size == 0:
+            # no ligand-polymer bonds
+            lig_polymer_bonds = np.empty((0, 3)).astype(int)
+        else:
+            # np.array([[atom1, atom2, bond_order], ...])
+            lig_polymer_bonds = bond_array[lig_polymer_bond_indices]
+        return lig_polymer_bonds
+
     def clean_structure(
         self,
         mse_to_met=True,

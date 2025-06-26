@@ -59,6 +59,71 @@ class ChainPermutation:
         self.ref_chain_id_to_entity_id = self.ref_struct.get_chain_id_to_entity_id()
         self.model_chain_id_to_entity_id = self.model_struct.get_chain_id_to_entity_id()
 
+        self.ref_and_model_mapping_ban_set = self._get_ban_set_by_lig_bonded_position()
+
+    @staticmethod
+    def find_bonded_position_for_lig_chains(
+        struct: Structure,
+    ) -> dict[str, tuple[str, int]]:
+        """
+        Find the bonded entity ID and residue ID for ligand chains.
+
+        Args:
+            struct (Structure): Structure object.
+
+        Returns:
+            dict[str, tuple[str, int]]: Mapping of ligand chain ID to bonded
+                                        entity ID and residue ID.
+        """
+        ligand_polymer_bonds = struct.get_ligand_polymer_bonds()
+
+        chain_id_to_bonded_position = {}
+        for bond in ligand_polymer_bonds:
+            atom1, atom2, _ = bond
+            if struct.atom_array.label_entity_id[atom1] not in struct.entity_poly_type:
+                # atom1 is ligand
+                lig_chain_id = struct.uni_chain_id[atom1]
+                entity_id = struct.atom_array.label_entity_id[atom2]
+                res_id = struct.atom_array.res_id[atom2]
+            else:
+                lig_chain_id = struct.uni_chain_id[atom2]
+                entity_id = struct.atom_array.label_entity_id[atom1]
+                res_id = struct.atom_array.res_id[atom1]
+            chain_id_to_bonded_position[lig_chain_id] = (entity_id, res_id)
+        return chain_id_to_bonded_position
+
+    def _get_ban_set_by_lig_bonded_position(
+        self,
+    ) -> set[tuple[str, str]]:
+        ref_chain_id_to_bond_position = (
+            ChainPermutation.find_bonded_position_for_lig_chains(self.ref_struct)
+        )
+        model_chain_id_to_bond_position = (
+            ChainPermutation.find_bonded_position_for_lig_chains(self.model_struct)
+        )
+
+        ban_set = set()
+        for ref_chain_id in np.unique(self.ref_struct.uni_chain_id):
+            ref_bonded_entity, ref_bonded_res_id = ref_chain_id_to_bond_position.get(
+                ref_chain_id, ["-1", -1]
+            )
+            mapped_model_bonded_entity = self.ref_to_model_entity_id.get(
+                ref_bonded_entity, "-1"
+            )
+
+            for model_chain_id in np.unique(self.model_struct.uni_chain_id):
+                (
+                    model_bonded_entity,
+                    model_bonded_res_id,
+                ) = model_chain_id_to_bond_position.get(model_chain_id, ["-1", -1])
+
+                if mapped_model_bonded_entity != "-1" and model_bonded_entity != "-1":
+                    if (mapped_model_bonded_entity != model_bonded_entity) or (
+                        ref_bonded_res_id != model_bonded_res_id
+                    ):
+                        ban_set.add((ref_chain_id, model_chain_id))
+        return ban_set
+
     def find_model_anchor_chains(self) -> str:
         """
         Ref: AlphaFold3 SI Chapter 4.2. -> AlphaFold Multimer Chapter 7.3.1
@@ -180,15 +245,18 @@ class ChainPermutation:
         row_indices = []
         col_indices = []
 
+        dist_matrix_copy = dist_matrix.copy()
         for _ in range(num_cols):
-            min_pos = np.unravel_index(np.argmin(dist_matrix), dist_matrix.shape)
+            min_pos = np.unravel_index(
+                np.argmin(dist_matrix_copy), dist_matrix_copy.shape
+            )
 
             row_indices.append(min_pos[0])
             col_indices.append(min_pos[1])
 
             # Set the found row and column to np.inf to ignore it
-            dist_matrix[min_pos[0], :] = np.inf
-            dist_matrix[:, min_pos[1]] = np.inf
+            dist_matrix_copy[min_pos[0], :] = np.inf
+            dist_matrix_copy[:, min_pos[1]] = np.inf
         return row_indices, col_indices
 
     @staticmethod
@@ -199,6 +267,7 @@ class ChainPermutation:
         struct2: Structure,
         coords1: np.ndarray,
         coords2: np.ndarray,
+        banned_chain_pairs: set[tuple[str, str]],
     ) -> dict[str, str]:
         """
         Chain mapping between two structures within the same entity using
@@ -212,12 +281,13 @@ class ChainPermutation:
             - Selecting the pair with minimal centroid distance
 
         Args:
-            chain_ids1 (list[str]): Chain IDs from first structure (may become struct2 after swap)
-            chain_ids2 (list[str]): Chain IDs from second structure (may become struct1 after swap)
+            chain_ids1 (list[str]): Chain IDs from first structure
+            chain_ids2 (list[str]): Chain IDs from second structure
             struct1 (Structure): First structure containing chain metadata
             struct2 (Structure): Second structure containing chain metadata
             coords1 (np.ndarray): Atom coordinates for struct1 (shape: [N, 3])
-            coords2 (np.ndarray): Atom coordinates for struct2 (shape: [M, 3])
+            coords2 (np.ndarray): Atom coordinates for struct2 (shape: [N, 3])
+            banned_chain_pairs (set[tuple[str, str]]): Pairs of chain IDs to be banned.
 
         Returns:
             dict[str, str]: Mapping of chain IDs from struct1 to struct2.
@@ -227,6 +297,8 @@ class ChainPermutation:
             chain_ids1, chain_ids2 = chain_ids2, chain_ids1
             struct1, struct2 = struct2, struct1
             coords1, coords2 = coords2, coords1
+            banned_chain_pairs = {(cid2, cid1) for cid1, cid2 in banned_chain_pairs}
+
             swapped = True
         else:
             swapped = False
@@ -241,6 +313,10 @@ class ChainPermutation:
             atoms1 = struct1.uni_atom_id[mask1]
 
             for cid2 in chain_ids2:
+                if (cid1, cid2) in banned_chain_pairs:
+                    # "inf" distance if the pair is banned
+                    continue
+
                 mask2 = struct2.uni_chain_id == cid2
                 atoms2 = struct2.uni_atom_id[mask2]
 
@@ -258,6 +334,9 @@ class ChainPermutation:
         matched_chains = {}
         row_indices, col_indices = ChainPermutation._find_min_indices(dist_mat)
         for row, col in zip(row_indices, col_indices):
+            if np.isinf(dist_mat[row, col]):
+                # "inf" distance if the pair is banned
+                continue
             matched_chains[chain_ids1[row]] = chain_ids2[col]
 
         return (
@@ -309,6 +388,7 @@ class ChainPermutation:
                 struct2=self.model_struct,
                 coords1=aligned_ref_coord,
                 coords2=self.model_struct.atom_array.coord,
+                banned_chain_pairs=self.ref_and_model_mapping_ban_set,
             )
             matched_chains.update(matched_chains_in_curr_entity)
         return matched_chains
@@ -443,6 +523,12 @@ class ChainPermutation:
         anchors = {}
 
         for ref_anchor_chain_id in ref_anchor_candidates:
+            if (
+                ref_anchor_chain_id,
+                model_anchor_chain_id,
+            ) in self.ref_and_model_mapping_ban_set:
+                continue
+
             # Find atoms in ref chain to match atoms in model chain
             ref_chain_mask = self.ref_struct.uni_chain_id == ref_anchor_chain_id
             ref_anchor_coord = self.ref_struct.atom_array.coord[ref_chain_mask]
@@ -555,9 +641,6 @@ class ChainPermutation:
                 - Anchors used for alignment.
         """
         model_anchor_chain_ids = self.find_model_anchor_chains()
-        if not self.enumerate_all_anchors:
-            # Only use the first anchor chain
-            model_anchor_chain_ids = [model_anchor_chain_ids[0]]
 
         ref_to_model_optimal_mapping = None
         best_rmsd = float("inf")
@@ -579,8 +662,17 @@ class ChainPermutation:
             ) = self.find_ref_to_model_optimal_chain_mapping(
                 model_anchor_chain_id, ref_anchor_candidates
             )
+
+            if mapping_i is None:
+                continue
+
             if best_rmsd_i < best_rmsd:
                 best_rmsd = best_rmsd_i
                 ref_to_model_optimal_mapping = mapping_i
                 best_anchors = anchors
+
+                if not self.enumerate_all_anchors:
+                    # Only use the first valid anchor chain
+                    break
+
         return ref_to_model_optimal_mapping, best_anchors

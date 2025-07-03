@@ -24,6 +24,7 @@ from benchmark.configs.eval_type_config import (
     PB_VALID_CHECK_COL,
 )
 from benchmark.configs.rankers_config import MODEL_TO_RANKER_KEYS
+from benchmark.utils import get_binomial_ci, get_bootstrap_ci
 
 
 class ChainInterfaceDisplayer:
@@ -166,7 +167,7 @@ class ChainInterfaceDisplayer:
 
         if "cluster_id" not in metrics_df.columns:
             # Set a default cluster_id
-            metrics_df["cluster_id"] = "nan_cluster_id"
+            metrics_df["cluster_id"] = [str(i) for i in range(len(metrics_df))]
 
         if self.seeds:
             # Selected by seeds
@@ -230,7 +231,8 @@ class ChainInterfaceDisplayer:
                     all_avg_dockq.append(avg_dockq)
                     all_avg_dockq_sr.append(avg_dockq_sr)
 
-                avg_dockq_avg_sr = np.mean(np.array(all_avg_dockq) > success_threshold)
+                avg_dockq_sr = np.array(all_avg_dockq) > success_threshold
+                avg_dockq_avg_sr = np.mean(avg_dockq_sr)
                 avg_dockq_sr_avg_sr = np.mean(all_avg_dockq_sr)
                 dockq_result = {
                     "eval_type": eval_type,
@@ -239,6 +241,10 @@ class ChainInterfaceDisplayer:
                     "ranker": agg_func_name,
                     "avg_dockq_avg_sr": avg_dockq_avg_sr,
                     "avg_dockq_sr_avg_sr": avg_dockq_sr_avg_sr,
+                    "ci_avg_dockq_avg_sr": get_binomial_ci(
+                        total_num=len(avg_dockq_sr), success_num=avg_dockq_sr.sum()
+                    ),
+                    "ci_avg_dockq_sr_avg_sr": get_bootstrap_ci(all_avg_dockq_sr),
                 }
                 dockq_results.append(dockq_result)
         dockq_results_df = pd.DataFrame(dockq_results)
@@ -275,7 +281,7 @@ class ChainInterfaceDisplayer:
 
         if "cluster_id" not in metrics_df.columns:
             # Set a default cluster_id
-            metrics_df["cluster_id"] = "nan_cluster_id"
+            metrics_df["cluster_id"] = [str(i) for i in range(len(metrics_df))]
 
         if self.seeds:
             # Selected by seeds
@@ -357,12 +363,15 @@ class ChainInterfaceDisplayer:
                     all_avg_lddt.append(avg_lddt)
                 avg_avg_lddt = np.mean(all_avg_lddt)
 
+                lddt_ci = get_bootstrap_ci(all_avg_lddt)
+
                 lddt_result = {
                     "eval_type": eval_type,
                     "entry_id_num": entry_id_num,
                     "cluster_num": len(cluster_id_to_lddt_scores),
                     "ranker": agg_func_name,
                     "lddt": avg_avg_lddt,
+                    "ci_lddt": lddt_ci,
                 }
                 lddt_results.append(lddt_result)
 
@@ -549,6 +558,16 @@ class RMSDDisplayer:
                 "lig_rmsd_sr": lig_sr,
                 "pocket_avg_rmsd": pocket_avg_rmsd,
                 "pocket_rmsd_sr": pocket_sr,
+                "ci_lig_avg_rmsd": get_bootstrap_ci(all_lig_rmsd),
+                "ci_lig_rmsd_sr": get_binomial_ci(
+                    total_num=len(all_lig_rmsd),
+                    success_num=(all_lig_rmsd < success_threshold).sum(),
+                ),
+                "ci_pocket_avg_rmsd": get_bootstrap_ci(all_pocket_rmsd),
+                "ci_pocket_rmsd_sr": get_binomial_ci(
+                    total_num=len(all_pocket_rmsd),
+                    success_num=(all_pocket_rmsd < success_threshold).sum(),
+                ),
             }
 
             for check_col in existed_pb_check_rows:

@@ -12,8 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+import numpy as np
+from scipy.stats import binomtest, bootstrap
 
 
 def divide_list_into_chunks(lst: list, n: int) -> list[list]:
@@ -143,3 +147,56 @@ def get_eval_result_json_path(
         Path: The path to the evaluation result JSON file.
     """
     return eval_result_dir / entry_id / str(seed) / f"sample_{sample}_metrics.json"
+
+
+def get_bootstrap_ci(
+    data: list[float],
+    statistic: Callable[[np.ndarray], float] = np.mean,
+    n: int = 10000,
+) -> tuple[float, float]:
+    """
+    Bootstrap confidence interval for the mean of a distribution.
+
+    Args:
+        data (list[float]): The data to bootstrap.
+        statistic (Callable[[np.ndarray], float], optional): The statistic to calculate. Defaults to np.mean.
+        n (int, optional): The number of bootstrap samples to generate. Defaults to 10000.
+
+    Returns:
+        tuple[float, float]: The lower and upper bounds of the confidence interval.
+    """
+    if len(data) == 0:
+        logging.warning(
+            "Data is empty, cannot calculate confidence \
+                interval for bootstrap. return (0, 0)"
+        )
+        ci_lower, ci_upper = 0.0, 0.0
+    elif len(data) == 1:
+        logging.warning(
+            "Data has only one element, cannot calculate confidence \
+                interval for bootstrap. return (data[0], data[0])"
+        )
+        ci_lower, ci_upper = data[0], data[0]
+    else:
+        data = (data,)
+        bootstrap_result = bootstrap(data, statistic, n_resamples=n)
+
+        ci_lower, ci_upper = bootstrap_result.confidence_interval
+    return np.round(ci_lower, 4), np.round(ci_upper, 4)
+
+
+def get_binomial_ci(total_num: int, success_num: int) -> tuple[float, float]:
+    """
+    Calculate the Clopper-Pearson interval (exact binomial confidence interval)
+    for a binomial distribution.
+
+    Args:
+        total_num (int): The total number of trials.
+        success_num (int): The number of successful trials.
+
+    Returns:
+        tuple[float, float]: The lower and upper bounds of the confidence interval.
+    """
+    binomtest_result = binomtest(success_num, total_num).proportion_ci(0.95)
+    ci_lower, ci_upper = binomtest_result
+    return np.round(ci_lower, 4), np.round(ci_upper, 4)

@@ -160,6 +160,11 @@ class BaseEvaluator:
 
             if (pdb_dir / pdb_id).exists():
                 pdb_dir = pdb_dir / pdb_id
+            elif (pdb_dir / name).exists():
+                pdb_dir = pdb_dir / name
+            else:
+                logging.warning("Cannot find pdb_dir for %s, skip.", name)
+                continue
 
             for seed_dir in pdb_dir.iterdir():
                 seed = seed_dir.name.replace("seed_", "")

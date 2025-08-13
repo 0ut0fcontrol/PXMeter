@@ -232,7 +232,7 @@ def get_ccd_perm_info(ccd_code: str) -> dict[str, Any]:
         for node in removed_nodes:
             mol_graph.remove_node(node)
 
-        matches = get_mol_graph_matches(mol_graph, mol_graph)[:1000]
+        matches = get_mol_graph_matches(mol_graph, mol_graph, max_matches=1000)
 
         # re-index after removing H
         reverted_old_atom_map = {v: k for k, v in mol.atom_map.items()}

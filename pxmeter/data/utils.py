@@ -234,13 +234,16 @@ def rdkit_mol_to_nx_graph(mol: Chem.Mol) -> nx.Graph:
     return G
 
 
-def get_mol_graph_matches(mol_graph1: nx.Graph, mol_graph2: nx.Graph) -> list[dict]:
+def get_mol_graph_matches(
+    mol_graph1: nx.Graph, mol_graph2: nx.Graph, max_matches: int = 1000
+) -> list[dict]:
     """
     Find all isomorphisms between subgraph of mol_graph1 and mol_graph2.
 
     Args:
         mol_graph1 (nx.Graph): Source molecular graph (typically larger subgraph)
         mol_graph2 (nx.Graph): Target molecular graph (typically smaller supergraph)
+        max_matches (int): Maximum number of matches to return. Default is 1000.
 
     Returns:
         list[dict]: List of node mapping dictionaries where each dictionary represents
@@ -254,4 +257,12 @@ def get_mol_graph_matches(mol_graph1: nx.Graph, mol_graph2: nx.Graph) -> list[di
         mol_graph2,
         node_match=lambda x, y: x["atomic_num"] == y["atomic_num"],
     )
-    return list(isomatcher.subgraph_isomorphisms_iter())
+
+    matches = []
+    num = 0
+    for i in isomatcher.subgraph_isomorphisms_iter():
+        matches.append(i)
+        num += 1
+        if num >= max_matches:
+            break
+    return matches

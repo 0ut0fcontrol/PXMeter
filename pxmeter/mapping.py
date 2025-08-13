@@ -584,7 +584,7 @@ class MappingCIF:
             ref_graph = rdkit_mol_to_nx_graph(ref_mol)
             model_graph = rdkit_mol_to_nx_graph(model_mol)
             try:
-                matches = get_mol_graph_matches(model_graph, ref_graph)
+                matches = get_mol_graph_matches(model_graph, ref_graph, max_matches=1)
                 assert len(matches) > 0
                 match = matches[0]
 

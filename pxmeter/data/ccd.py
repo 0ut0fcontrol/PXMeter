@@ -24,7 +24,7 @@ from pdbeccdutils.core import ccd_reader
 from rdkit import Chem
 from rdkit.Geometry import Point3D
 
-from pxmeter.configs.data_config import COMPONENTS_FILE
+from pxmeter.configs.data_config import CCD_BLOCKS
 from pxmeter.data.utils import (
     get_inter_residue_bonds,
     get_mol_graph_matches,
@@ -32,17 +32,6 @@ from pxmeter.data.utils import (
 )
 
 logging.getLogger("rdkit").setLevel(logging.ERROR)
-
-
-@functools.lru_cache
-def _gemmi_load_ccd_cif() -> gemmi.cif.Document:
-    """
-    Load the CCD components file using the gemmi library.
-
-    Returns:
-        gemmi.cif.Document: gemmi ccd components file
-    """
-    return gemmi.cif.read(str(COMPONENTS_FILE))
 
 
 @functools.lru_cache
@@ -57,10 +46,8 @@ def get_ccd_mol_from_cif(ccd_code: str) -> Chem.Mol:
         mol (Chem.Mol): The RDKit molecule object corresponding to the given CCD code.
                               Returns None if the CCD code is not found.
     """
-    ccd_cif = _gemmi_load_ccd_cif()
-
     try:
-        ccd_block = ccd_cif[ccd_code]
+        ccd_block = gemmi.cif.read_string(CCD_BLOCKS[ccd_code])[0]
     except KeyError:
         return
     ccd_reader_result = ccd_reader._parse_pdb_mmcif(ccd_block, sanitize=True)

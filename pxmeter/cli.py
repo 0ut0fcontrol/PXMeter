@@ -18,9 +18,10 @@ from pathlib import Path
 import click
 
 from pxmeter.configs.data_config import (
+    CCD_BLOCKS_JSON,
     COMPONENTS_FILE,
     download_ccd_cif,
-    make_one_letter_code_json_from_ccd,
+    make_precomputed_json_from_ccd,
     ONE_LETTER_CODE_JSON,
 )
 from pxmeter.eval import evaluate, MetricResult
@@ -176,4 +177,6 @@ def update():
     Update the CCD database.
     """
     download_ccd_cif(output_path=COMPONENTS_FILE.parent)
-    make_one_letter_code_json_from_ccd(COMPONENTS_FILE, ONE_LETTER_CODE_JSON)
+    make_precomputed_json_from_ccd(
+        COMPONENTS_FILE, CCD_BLOCKS_JSON, ONE_LETTER_CODE_JSON
+    )

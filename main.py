@@ -17,7 +17,6 @@ import logging
 from pathlib import Path
 
 from pxmeter.cli import run_eval_cif
-from pxmeter.utils import none_or_str
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
@@ -52,7 +51,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--ref_assembly_id",
-        type=none_or_str,
+        type=str,
         default=None,
         help="Assembly ID in the reference CIF file. Defaults to None.",
     )
@@ -65,7 +64,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-l",
         "--interested_lig_label_asym_id",
-        type=none_or_str,
+        type=str,
         default=None,
         help="The label_asym_id of the ligand of interest in the reference structure (for ligand RMSD metrics). \
             If multiple ligands are present, separate them by comma. Defaults to None.",
@@ -73,7 +72,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-c",
         "--chain_id_to_mol_json",
-        type=none_or_str,
+        type=str,
         default=None,
         help="Path to a JSON file containing a mapping of chain IDs to molecular input (SMILES). \
             E.g. {'B': 'c1ccccc1', 'D':'CCCC'}",

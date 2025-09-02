@@ -20,14 +20,14 @@ from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
-from joblib import Parallel, delayed
+from joblib import delayed, Parallel
+from pxmeter.constants import PROTEIN
 from tqdm import tqdm
 
 from benchmark.aggregator import run_aggregator
 from benchmark.configs.data_config import EVAL_RESULTS, SUPPORTED_DATA
 from benchmark.show_results import ChainInterfaceDisplayer, RMSDDisplayer
 from benchmark.simplified_results import reduce_csv_content
-from pxmeter.constants import PROTEIN
 
 
 def get_antibody_entities():
@@ -104,9 +104,9 @@ def get_af3_ab_sub_df(metrics_df: pd.DataFrame) -> pd.DataFrame:
     interface_to_cluster = {}
     for _idx, row in meta_df.iterrows():
         # The chain ids already sorted
-        interface_to_cluster[(row["pdb_id"], row["chain_id_1"], row["chain_id_2"])] = (
-            row["interface_cluster_key"]
-        )
+        interface_to_cluster[
+            (row["pdb_id"], row["chain_id_1"], row["chain_id_2"])
+        ] = row["interface_cluster_key"]
 
     in_af3_ab_mask = metrics_df.apply(
         lambda row, cluster_dict=interface_to_cluster: (
@@ -334,10 +334,11 @@ def get_recent_pdb_results_df(
     displayer_not_lowh = ChainInterfaceDisplayer(
         sub_metrics_df, model=model, seeds=seeds
     )
-    ligand_protein_lddt_df, ligand_protein_lddt_details_df = (
-        displayer_not_lowh.get_lddt_by_cluster(
-            eval_types=["Protein-Ligand"],
-        )
+    (
+        ligand_protein_lddt_df,
+        ligand_protein_lddt_details_df,
+    ) = displayer_not_lowh.get_lddt_by_cluster(
+        eval_types=["Protein-Ligand"],
     )
 
     # Merge results
@@ -450,23 +451,32 @@ def _get_a_dataset_result(
     result_df_list = []
     details_df_list = []
     if eval_dataset == "RecentPDB":
-        dockq_results_df, lddt_results_df, dockq_details_df, lddt_details_df = (
-            get_recent_pdb_results_df(sub_metrics_df, model, seeds)
-        )
+        (
+            dockq_results_df,
+            lddt_results_df,
+            dockq_details_df,
+            lddt_details_df,
+        ) = get_recent_pdb_results_df(sub_metrics_df, model, seeds)
         result_df_list += [dockq_results_df, lddt_results_df]
         details_df_list += [dockq_details_df, lddt_details_df]
 
     elif eval_dataset == "RecentPDB-NA":
-        dockq_results_df, lddt_results_df, dockq_details_df, lddt_details_df = (
-            get_recent_pdb_na_results_df(sub_metrics_df, model, seeds)
-        )
+        (
+            dockq_results_df,
+            lddt_results_df,
+            dockq_details_df,
+            lddt_details_df,
+        ) = get_recent_pdb_na_results_df(sub_metrics_df, model, seeds)
         result_df_list += [dockq_results_df, lddt_results_df]
         details_df_list += [dockq_details_df, lddt_details_df]
 
     elif eval_dataset == "AF3-AB":
-        dockq_results_df, lddt_results_df, dockq_details_df, lddt_details_df = (
-            get_af3_ab_results_df(sub_metrics_df, model, seeds)
-        )
+        (
+            dockq_results_df,
+            lddt_results_df,
+            dockq_details_df,
+            lddt_details_df,
+        ) = get_af3_ab_results_df(sub_metrics_df, model, seeds)
         result_df_list += [dockq_results_df, lddt_results_df]
         details_df_list += [dockq_details_df, lddt_details_df]
 
@@ -691,52 +701,87 @@ def save_all_results(
         # Find intersections
         intersection = subset_match_key.copy()  # Empty set if subset_csv is None
         dataset_name_to_df = {}
+        metrics_csv_to_full_df = {}
         for dataset_name, metrics_csv in dataset_name_to_csv_path.items():
-
-            # Load the CSV and convert "entry_id", "entity_id", "seed", "sample" to string
-            metrics_df = pd.read_csv(
-                metrics_csv,
-                dtype={
-                    "entry_id": str,
-                    "entity_id_1": str,
-                    "entity_id_2": str,
-                    "seed": str,
-                    "sample": str,
-                },
-                low_memory=False,
+            if metrics_csv not in metrics_csv_to_full_df:
+                # Load the CSV and convert "entry_id", "entity_id", "seed", "sample" to string
+                metrics_df = pd.read_csv(
+                    metrics_csv,
+                    dtype={
+                        "entry_id": str,
+                        "entity_id_1": str,
+                        "entity_id_2": str,
+                        "seed": str,
+                        "sample": str,
+                    },
+                    low_memory=False,
+                )
+                metrics_csv_to_full_df[metrics_csv] = metrics_df
+            else:
+                metrics_df = metrics_csv_to_full_df[metrics_csv]
+            logging.info(
+                "%s entries loaded from %s",
+                metrics_df["entry_id"].nunique(),
+                dataset_name,
             )
+
+            seeds = EVAL_RESULTS[dataset_name].get("seeds")
+            if seeds:
+                seeds = [str(seed) for seed in seeds]
+                sub_metrics_df = metrics_df[metrics_df["seed"].isin(seeds)].copy()
+                logging.info(
+                    "%s entries after filtering from %s by seeds %s\n",
+                    sub_metrics_df["entry_id"].nunique(),
+                    dataset_name,
+                    seeds,
+                )
+            else:
+                sub_metrics_df = metrics_df.copy()
 
             # Add "match_key" column to the DataFrame
             # In the JSON file output by PXMeter,
             # the chain_id pair for the interfaces has already been sorted
-            metrics_df["match_key"] = metrics_df.apply(
+            sub_metrics_df["match_key"] = sub_metrics_df.apply(
                 lambda row: "_".join(
-                    [row["entry_id"], str(row["chain_id_1"]), str(row["chain_id_2"])]
+                    [
+                        row["entry_id"],
+                        str(row["chain_id_1"]),
+                        str(row["chain_id_2"]),
+                    ]
                 ),
                 axis=1,
             )
-            unique_match_key = set(metrics_df["match_key"])
+            unique_match_key = set(sub_metrics_df["match_key"])
             if intersection:
                 intersection &= unique_match_key
             else:
                 intersection = unique_match_key
 
-            dataset_name_to_df[dataset_name] = metrics_df
+            dataset_name_to_df[dataset_name] = sub_metrics_df
 
         # Get intersection results
         for dataset_name, metrics_csv in dataset_name_to_csv_path.items():
             model = EVAL_RESULTS[dataset_name]["model"]
             seeds = EVAL_RESULTS[dataset_name].get("seeds")
-            metrics_df = dataset_name_to_df[dataset_name]
+            sub_metrics_df = dataset_name_to_df[dataset_name]
 
             if pdb_id_list is not None:
                 # Filter the DataFrame based on the list of PDB IDs
-                metrics_df = metrics_df[metrics_df["entry_id"].isin(pdb_id_list)]
+                sub_metrics_df = sub_metrics_df[
+                    sub_metrics_df["entry_id"].isin(pdb_id_list)
+                ]
                 assert (
-                    len(metrics_df) > 0
+                    len(sub_metrics_df) > 0
                 ), f"No PDB IDs found in the pdb_id_list for {metrics_csv}"
 
-            sub_metrics_df = metrics_df[metrics_df["match_key"].isin(intersection)]
+            sub_metrics_df = sub_metrics_df[
+                sub_metrics_df["match_key"].isin(intersection)
+            ]
+            logging.info(
+                "%s entries in the intersection from %s",
+                sub_metrics_df["entry_id"].nunique(),
+                dataset_name,
+            )
 
             tasks.append(
                 [

@@ -924,15 +924,28 @@ class MappingCIF:
         # This step will be change the res_id, res_name, atom_name in self.model_struct.atom_array
         self._align_model_lig_atom_to_ref(self.model_struct, model_to_ref_atom_mapping)
 
+        # Re-order model struct by res_id for each chain
+        order = []
+        for chain_id in np.unique(self.model_struct.uni_chain_id):
+            chain_mask = np.where(self.model_struct.uni_chain_id == chain_id)[0]
+            # Remove unmapped ligands
+            valid_chain_mask = chain_mask[
+                ~(
+                    (
+                        (self.model_struct.atom_array.res_name[chain_mask] == ".")
+                        & (self.model_struct.atom_array.atom_name[chain_mask] == ".")
+                    )
+                    | (
+                        self.model_struct.atom_array.res_id[chain_mask] < 0
+                    )  # -1 for unmapped residues
+                )
+            ]
+            res_ids = self.model_struct.atom_array.res_id[valid_chain_mask]
+            order.extend(valid_chain_mask[np.argsort(res_ids)])
+
         # Remove unmapped ligand of model and reset unique atom id
         self.model_struct = self.model_struct.select_substructure(
-            ~(
-                (
-                    (self.model_struct.atom_array.res_name == ".")
-                    & (self.model_struct.atom_array.atom_name == ".")
-                )
-                | (self.model_struct.atom_array.res_id < 0)  # -1 for unmapped residues
-            ),
+            order,
             reset_uni_id=True,
         )
 

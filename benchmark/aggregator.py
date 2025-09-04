@@ -20,12 +20,12 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from joblib import Parallel, delayed
-from tqdm import tqdm
+from joblib import delayed, Parallel
 
 from pxmeter.constants import POLYMER
+from tqdm import tqdm
 
-COMPLEX_METRICS = ["lddt"]
+COMPLEX_METRICS = ["lddt", "clashes"]
 CHAIN_METRICS = ["lddt", "ref_pocket_chain", "lig_rmsd_wo_refl", "pocket_rmsd_wo_refl"]
 INTERFACE_METRICS = ["lddt", "dockq"]
 

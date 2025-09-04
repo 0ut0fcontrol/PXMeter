@@ -34,6 +34,7 @@ from pxmeter.configs.run_config import RUN_CONFIG
 from pxmeter.constants import IONS, LIGAND
 from pxmeter.data.ccd import get_ccd_mol_from_chain_atom_array
 from pxmeter.data.struct import Structure
+from pxmeter.metrics.clashes import check_clashes_by_vdw
 from pxmeter.metrics.lddt_metrics import LDDT
 from pxmeter.metrics.rmsd_metrics import RMSDMetrics
 
@@ -553,6 +554,16 @@ class MetricResult:
         meta_info_dict["entry_id"] = ref_struct.entry_id
         meta_info_dict["ref_to_model_chain_mapping"] = chain_map
         meta_info_dict["ref_chain_info"] = cls._get_chain_info(ref_struct)
+
+        # Calculate clashes
+        if metric_config.calc_clashes:
+            clashes = check_clashes_by_vdw(
+                model_struct.atom_array,
+                vdw_scale_factor=metric_config.clashes.vdw_scale_factor,
+            )
+            complex_result_dict["clashes"] = len(
+                {x for a, b in clashes for x in (a, b)}
+            )
 
         # Calculate RMSD (if ligand and pocket specified in ref_features)
         if metric_config.calc_rmsd and interested_lig_label_asym_id:

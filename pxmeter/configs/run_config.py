@@ -23,6 +23,7 @@ RUN_CONFIG = ConfigDict(
             "enumerate_all_anchors": True,
         },
         "metric": {
+            "calc_clashes": True,
             "calc_lddt": True,
             "calc_dockq": True,
             "calc_rmsd": True,
@@ -31,6 +32,9 @@ RUN_CONFIG = ConfigDict(
                 "eps": 1e-6,
                 "nucleotide_threshold": 30.0,
                 "non_nucleotide_threshold": 15.0,
+            },
+            "clashes": {
+                "vdw_scale_factor": 0.5,
             },
         },
     }

@@ -251,6 +251,10 @@ class ChainPermutation:
                 np.argmin(dist_matrix_copy), dist_matrix_copy.shape
             )
 
+            if dist_matrix_copy[min_pos[0], min_pos[1]] == np.inf:
+                # No more valid pairs
+                break
+
             row_indices.append(min_pos[0])
             col_indices.append(min_pos[1])
 

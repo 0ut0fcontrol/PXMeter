@@ -83,6 +83,28 @@ class BaseEvaluator:
         self.ranker = MODEL_TO_RANKER_KEYS.nan
         self.eval_run_config = RUN_CONFIG
 
+    def _filter_each_data(self, each_data: list):
+        (
+            name,
+            pdb_id,
+            seed,
+            sample,
+        ) = each_data[:4]
+        # Skip if pdb_id not in pdb_ids_list
+        if self.pdb_ids_list is not None and pdb_id not in self.pdb_ids_list:
+            return None
+        # Skip if not overwrite and output already exists
+        output_metric_json, output_confidence_json = self._get_output_path(
+            name, seed, sample
+        )
+        if (
+            (not self.overwrite)
+            and output_metric_json.exists()
+            and output_confidence_json.exists()
+        ):
+            return None
+        return each_data
+
     def _filter_data(self, data):
         """
         Filters the input data based on certain criteria.
@@ -101,7 +123,6 @@ class BaseEvaluator:
         Returns:
             list: A list of filtered data tuples.
         """
-        filtered_data = []
 
         if self.chunk_str is not None:
             # chunk_id start from "1"
@@ -110,28 +131,65 @@ class BaseEvaluator:
             chunk_num = int(chunk_num)
             data = divide_list_into_chunks(data, chunk_num)[chunk_id - 1]
 
-        for each_data in data:
-            (
-                name,
-                pdb_id,
-                seed,
-                sample,
-            ) = each_data[:4]
-            # Skip if pdb_id not in pdb_ids_list
-            if self.pdb_ids_list is not None and pdb_id not in self.pdb_ids_list:
-                continue
-            # Skip if not overwrite and output already exists
-            output_metric_json, output_confidence_json = self._get_output_path(
-                name, seed, sample
+        results = [
+            r
+            for r in tqdm(
+                Parallel(n_jobs=self.num_cpu, return_as="generator_unordered")(
+                    delayed(self._filter_each_data)(each_data) for each_data in data
+                ),
+                total=len(data),
+                desc="Filter data",
             )
-            if (
-                (not self.overwrite)
-                and output_metric_json.exists()
-                and output_confidence_json.exists()
-            ):
-                continue
-            filtered_data.append(each_data)
+        ]
+
+        filtered_data = []
+        for r in results:
+            if r is not None:
+                filtered_data.append(r)
         return filtered_data
+
+    def _get_info_from_each_pdb_dir(self, pdb_dir: Path) -> list:
+        if not pdb_dir.is_dir():
+            return []
+
+        name = pdb_dir.stem
+        pdb_id = name.split("_")[0]
+
+        if (pdb_dir / pdb_id).exists():
+            pdb_dir = pdb_dir / pdb_id
+
+        sub_data = []
+        for seed_dir in pdb_dir.iterdir():
+            seed = seed_dir.name.replace("seed_", "")
+
+            # e.g. 5sak_summary_confidence_confidences_sample_0.json
+            sample_to_confidence_path = {
+                json_f.stem.split("_")[-1]: json_f
+                for json_f in (seed_dir / "predictions").glob("*sample_*.json")
+            }
+
+            # e.g. 5sak_sample_0.cif
+            for pred_cif in (seed_dir / "predictions").glob("*sample_*.cif"):
+                sample = pred_cif.stem.split("_")[-1]
+                confidence_json = sample_to_confidence_path.get(sample)
+                if confidence_json is None:
+                    logging.warning(
+                        "Cannot find confidence json for %s, skip.", pred_cif
+                    )
+                    continue
+                model_chain_id_to_lig_mol = None
+                sub_data.append(
+                    (
+                        name,
+                        pdb_id,
+                        seed,
+                        sample,
+                        pred_cif,
+                        confidence_json,
+                        model_chain_id_to_lig_mol,
+                    )
+                )
+        return sub_data
 
     def load_all_cif_and_confidence(self) -> list[tuple[Any]]:
         """
@@ -152,51 +210,25 @@ class BaseEvaluator:
                 - model_chain_id_to_lig_mol (dict[str, Chem.Mol], optional): A dictionary
                                       mapping ligand chain IDs to their corresponding molecules.
         """
+
+        pdb_dir_list = list(self.pred_dir.iterdir())
+        results = [
+            r
+            for r in tqdm(
+                Parallel(n_jobs=self.num_cpu, return_as="generator_unordered")(
+                    delayed(self._get_info_from_each_pdb_dir)(pdb_dir)
+                    for pdb_dir in pdb_dir_list
+                ),
+                total=len(pdb_dir_list),
+                desc="Looking for CIF and confidence JSON files",
+            )
+        ]
+
         # List of tuple (name, pdb_id, seed, sample, pred_cif, confidence_json)
         data = []
-        for pdb_dir in self.pred_dir.iterdir():
-            name = pdb_dir.stem
-            pdb_id = name.split("_")[0]
+        for sub_data in results:
+            data.extend(sub_data)
 
-            if (pdb_dir / pdb_id).exists():
-                pdb_dir = pdb_dir / pdb_id
-            elif (pdb_dir / name).exists():
-                pdb_dir = pdb_dir / name
-            else:
-                logging.warning("Cannot find pdb_dir for %s, skip.", name)
-                continue
-
-            for seed_dir in pdb_dir.iterdir():
-                seed = seed_dir.name.replace("seed_", "")
-
-                # e.g. 5sak_summary_confidence_confidences_sample_0.json
-                sample_to_confidence_path = {
-                    json_f.stem.split("_")[-1]: json_f
-                    for json_f in (seed_dir / "predictions").glob("*sample_*.json")
-                }
-
-                # e.g. 5sak_sample_0.cif
-                for pred_cif in (seed_dir / "predictions").glob("*sample_*.cif"):
-                    sample = pred_cif.stem.split("_")[-1]
-                    confidence_json = sample_to_confidence_path.get(sample)
-                    if confidence_json is None:
-                        logging.warning(
-                            "Cannot find confidence json for %s, skip.", pred_cif
-                        )
-                        continue
-                    model_chain_id_to_lig_mol = None
-
-                    data.append(
-                        (
-                            name,
-                            pdb_id,
-                            seed,
-                            sample,
-                            pred_cif,
-                            confidence_json,
-                            model_chain_id_to_lig_mol,
-                        )
-                    )
         logging.info("Found %s data", len(data))
 
         data_after_filter = self._filter_data(data)
@@ -350,9 +382,6 @@ class BaseEvaluator:
             # For PoseBusters only
             true_cif = self.true_dir / f"{pdb_id}_cropped.cif"
 
-        # Make directory if not exist
-        output_metric_json.parent.mkdir(parents=True, exist_ok=True)
-
         if self.pdb_id_to_lig_label_asym_id:
             interested_lig_label_asym_id = self.pdb_id_to_lig_label_asym_id[pdb_id]
             if isinstance(interested_lig_label_asym_id, str):
@@ -376,7 +405,12 @@ class BaseEvaluator:
                 run_config=self.eval_run_config,
             )
 
-            metric_result.to_json(json_file=output_metric_json)
+            output_metric_json.parent.mkdir(parents=True, exist_ok=True)
+
+            # Output to a *.json.tmp file, then rename to *.json
+            output_metric_tmp_json = output_metric_json.with_suffix(".json.tmp")
+            metric_result.to_json(json_file=output_metric_tmp_json)
+            output_metric_tmp_json.rename(output_metric_json)
 
             self.save_mapped_confidence_json(
                 rankers=self.ranker,
@@ -502,73 +536,50 @@ class BoltzEvaluator(BaseEvaluator):
         )
         self.ranker = MODEL_TO_RANKER_KEYS.boltz
 
-    def load_all_cif_and_confidence(self) -> list[tuple[str]]:
-        """
-        Derived from BaseEvaluator.
+    def _get_info_from_each_pdb_dir(self, pdb_dir: Path) -> list:
+        if not pdb_dir.is_dir():
+            return []
 
-        Load all CIF and confidence JSON files from the prediction directories.
+        name = pdb_dir.stem
+        pdb_id = name.split("_")[0]
 
-        This method iterates through the prediction directories and collects
-        tuples containing the name, pdb_id, seed, sample, path to the predicted
-        CIF file, and path to the confidence JSON file.
+        sub_data = []
+        for seed_dir in pdb_dir.iterdir():
+            seed = seed_dir.name.replace("seed_", "")
 
-        Returns:
-            list[tuple[str]]: A list of tuples where each tuple contains:
-                - name (str): The name of the prediction directory.
-                - pdb_id (str): The PDB ID extracted from the directory name.
-                - seed (str): The seed value extracted from the seed directory name.
-                - sample (str): The sample identifier extracted from the file name.
-                - pred_cif (Path): The path to the predicted CIF file.
-                - confidence_json (Path): The path to the confidence JSON file.
-                - model_chain_id_to_lig_mol (dict[str, Chem.Mol], optional): A dictionary
-                                      mapping ligand chain IDs to their corresponding molecules.
-        """
-        # List of tuple (name, pdb_id, seed, sample, pred_cif, confidence_json)
-        data = []
-        for pdb_dir in self.pred_dir.iterdir():
-            name = pdb_dir.stem
-            pdb_id = name.split("_")[0]
-
-            for seed_dir in pdb_dir.iterdir():
-                seed = seed_dir.name.replace("seed_", "")
-
-                # e.g. confidence_6st5_model_0.json
-                sample_to_confidence_path = {
-                    json_f.stem.split("_")[-1]: json_f
-                    for json_f in (
-                        seed_dir / f"boltz_results_{pdb_id}" / "predictions" / pdb_id
-                    ).glob("*model_*.json")
-                }
-
-                # e.g. 6st5_model_0.cif
-                for pred_cif in (
+            # e.g. confidence_6st5_model_0.json
+            sample_to_confidence_path = {
+                json_f.stem.split("_")[-1]: json_f
+                for json_f in (
                     seed_dir / f"boltz_results_{pdb_id}" / "predictions" / pdb_id
-                ).glob("*model_*.cif"):
-                    sample = pred_cif.stem.split("_")[-1]
-                    confidence_json = sample_to_confidence_path.get(sample)
-                    if confidence_json is None:
-                        logging.warning(
-                            "Cannot find confidence json for %s, skip.", pred_cif
-                        )
-                        continue
-                    model_chain_id_to_lig_mol = None
+                ).glob("*model_*.json")
+            }
 
-                    data.append(
-                        (
-                            name,
-                            pdb_id,
-                            seed,
-                            sample,
-                            pred_cif,
-                            confidence_json,
-                            model_chain_id_to_lig_mol,
-                        )
+            # e.g. 6st5_model_0.cif
+            for pred_cif in (
+                seed_dir / f"boltz_results_{pdb_id}" / "predictions" / pdb_id
+            ).glob("*model_*.cif"):
+                sample = pred_cif.stem.split("_")[-1]
+                confidence_json = sample_to_confidence_path.get(sample)
+                if confidence_json is None:
+                    logging.warning(
+                        "Cannot find confidence json for %s, skip.", pred_cif
                     )
-        logging.info("Found %s data from %s", len(data), self.pred_dir)
+                    continue
+                model_chain_id_to_lig_mol = None
 
-        data_after_filter = self._filter_data(data)
-        logging.info("Found %s data after filtering", len(data_after_filter))
-        return data_after_filter
+                sub_data.append(
+                    (
+                        name,
+                        pdb_id,
+                        seed,
+                        sample,
+                        pred_cif,
+                        confidence_json,
+                        model_chain_id_to_lig_mol,
+                    )
+                )
+        return sub_data
 
 
 class ChaiEvaluator(BaseEvaluator):
@@ -633,83 +644,60 @@ class ChaiEvaluator(BaseEvaluator):
                 lig_chain_id_to_mol[chain_id] = mol
         return lig_chain_id_to_mol
 
-    def load_all_cif_and_confidence(self) -> list[tuple[str]]:
-        """
-        Derived from BaseEvaluator.
+    def _get_info_from_each_pdb_dir(self, pdb_dir: Path) -> list:
+        if not pdb_dir.is_dir():
+            return []
 
-        Load all CIF and confidence JSON files from the prediction directories.
+        name = pdb_dir.stem
+        pdb_id = name.split("_")[0]
 
-        This method iterates through the prediction directories and collects
-        tuples containing the name, pdb_id, seed, sample, path to the predicted
-        CIF file, and path to the confidence JSON file.
+        sub_data = []
+        for seed_dir in pdb_dir.iterdir():
+            seed = seed_dir.name.replace("seed_", "")
 
-        Returns:
-            list[tuple[str]]: A list of tuples where each tuple contains:
-                - name (str): The name of the prediction directory.
-                - pdb_id (str): The PDB ID extracted from the directory name.
-                - seed (str): The seed value extracted from the seed directory name.
-                - sample (str): The sample identifier extracted from the file name.
-                - pred_cif (Path): The path to the predicted CIF file.
-                - confidence_json (Path): The path to the confidence JSON file.
-                - model_chain_id_to_lig_mol (dict[str, Chem.Mol], optional): A dictionary
-                                      mapping ligand chain IDs to their corresponding molecules.
-        """
-        # List of tuple (name, pdb_id, seed, sample, pred_cif, confidence_json)
-        data = []
-        for pdb_dir in self.pred_dir.iterdir():
-            name = pdb_dir.stem
-            pdb_id = name.split("_")[0]
+            # e.g. scores.model_idx_0.json
+            sample_to_confidence_path = {
+                json_f.stem.split("_")[-1]: json_f
+                for json_f in seed_dir.glob("scores.model_idx_*.json")
+            }
 
-            for seed_dir in pdb_dir.iterdir():
-                seed = seed_dir.name.replace("seed_", "")
+            # e.g. pred.model_idx_0.cif
+            for pred_cif in (seed_dir).glob("pred.model_idx_*.cif"):
+                sample = pred_cif.stem.split("_")[-1]
+                confidence_json = sample_to_confidence_path.get(sample)
+                if confidence_json is None:
+                    logging.warning(
+                        "Can not find confidence file for %s, skip.", pred_cif
+                    )
+                    continue
 
-                # e.g. scores.model_idx_0.json
-                sample_to_confidence_path = {
-                    json_f.stem.split("_")[-1]: json_f
-                    for json_f in seed_dir.glob("scores.model_idx_*.json")
-                }
-
-                # e.g. pred.model_idx_0.cif
-                for pred_cif in (seed_dir).glob("pred.model_idx_*.cif"):
-                    sample = pred_cif.stem.split("_")[-1]
-                    confidence_json = sample_to_confidence_path.get(sample)
-                    if confidence_json is None:
+                if self.input_fasta_dir is None:
+                    model_chain_id_to_lig_mol = None
+                else:
+                    fasta_file = self.input_fasta_dir / f"{pdb_id}.fasta"
+                    if not fasta_file.exists():
                         logging.warning(
-                            "Can not find confidence file for %s, skip.", pred_cif
+                            "Fasta file %s does not exist",
+                            fasta_file,
                         )
-                        continue
-
-                    if self.input_fasta_dir is None:
                         model_chain_id_to_lig_mol = None
                     else:
-                        fasta_file = self.input_fasta_dir / f"{pdb_id}.fasta"
-                        if not fasta_file.exists():
-                            logging.warning(
-                                "Fasta file %s does not exist",
-                                fasta_file,
-                            )
-                            model_chain_id_to_lig_mol = None
-                        else:
-                            model_chain_id_to_lig_mol = self._get_mols_from_chai_fasta(
-                                fasta_file
-                            )
-
-                    data.append(
-                        (
-                            name,
-                            pdb_id,
-                            seed,
-                            sample,
-                            pred_cif,
-                            confidence_json,
-                            model_chain_id_to_lig_mol,
+                        model_chain_id_to_lig_mol = self._get_mols_from_chai_fasta(
+                            fasta_file
                         )
-                    )
-        logging.info("Found %s data", len(data))
 
-        data_after_filter = self._filter_data(data)
-        logging.info("Found %s data after filtering", len(data_after_filter))
-        return data_after_filter
+                sub_data.append(
+                    (
+                        name,
+                        pdb_id,
+                        seed,
+                        sample,
+                        pred_cif,
+                        confidence_json,
+                        model_chain_id_to_lig_mol,
+                    )
+                )
+        return sub_data
 
 
 class AF2MultimerEvaluator(BaseEvaluator):
@@ -744,62 +732,44 @@ class AF2MultimerEvaluator(BaseEvaluator):
         )
         self.ranker = MODEL_TO_RANKER_KEYS.af2m
 
-    def load_all_cif_and_confidence(self) -> list[tuple[str]]:
-        """
-        Derived from BaseEvaluator.
+    def _get_info_from_each_pdb_dir(self, pdb_dir: Path) -> list:
+        if not pdb_dir.is_dir():
+            return []
 
-        Load all CIF and confidence JSON files from the prediction directories.
+        name = pdb_dir.stem
+        pdb_id = name.split("_")[0]
 
-        This method iterates through the prediction directories and collects
-        tuples containing the name, pdb_id, seed, sample, path to the predicted
-        CIF file, and path to the confidence JSON file.
+        if (pdb_dir / pdb_id).exists():
+            pdb_dir = pdb_dir / pdb_id
 
-        Returns:
-            list[tuple[str]]: A list of tuples where each tuple contains:
-                - name (str): The name of the prediction directory.
-                - pdb_id (str): The PDB ID extracted from the directory name.
-                - seed (str): The seed value extracted from the seed directory name.
-                - sample (str): The sample identifier extracted from the file name.
-                - pred_cif (Path): The path to the predicted CIF file.
-                - confidence_json (Path): The path to the confidence JSON file.
-                - model_chain_id_to_lig_mol (dict[str, Chem.Mol], optional): A dictionary
-                                      mapping ligand chain IDs to their corresponding molecules.
-        """
-        # List of tuple (name, pdb_id, seed, sample, pred_cif, confidence_json)
-        data = []
-        for pdb_dir in self.pred_dir.iterdir():
-            name = pdb_dir.stem
-            pdb_id = name.split("_")[0]
+        debug_file = pdb_dir / "ranking_debug.json"
+        if not debug_file.exists():
+            return []
+        with open(debug_file) as f:
+            confidence_dict = json.load(f)
 
-            debug_file = pdb_dir / "ranking_debug.json"
-            with open(debug_file) as f:
-                confidence_dict = json.load(f)
+        # e.g. unrelaxed_model_1_multimer_v3_pred_0.cif
+        sub_data = []
+        for pred_cif in pdb_dir.glob("unrelaxed_model_*.cif"):
+            split_filename = pred_cif.stem.split("_")
+            sample, seed = split_filename[2], split_filename[-1]
 
-            # e.g. unrelaxed_model_1_multimer_v3_pred_0.cif
-            for pred_cif in pdb_dir.glob("unrelaxed_model_*.cif"):
-                split_filename = pred_cif.stem.split("_")
-                seed, sample = split_filename[2], split_filename[-1]
+            model_name = pred_cif.stem.replace("unrelaxed_", "")
+            confidence_score = confidence_dict["iptm+ptm"][model_name]
+            model_chain_id_to_lig_mol = None
 
-                model_name = pred_cif.stem.replace("unrelaxed_", "")
-                confidence_score = confidence_dict["iptm+ptm"][model_name]
-                model_chain_id_to_lig_mol = None
-
-                data.append(
-                    (
-                        name,
-                        pdb_id,
-                        seed,
-                        sample,
-                        pred_cif,
-                        confidence_score,  # return confidence score instead of confidence json
-                        model_chain_id_to_lig_mol,
-                    )
+            sub_data.append(
+                (
+                    name,
+                    pdb_id,
+                    seed,
+                    sample,
+                    pred_cif,
+                    confidence_score,  # return confidence score instead of confidence json
+                    model_chain_id_to_lig_mol,
                 )
-        logging.info("Found %s data", len(data))
-
-        data_after_filter = self._filter_data(data)
-        logging.info("Found %s data after filtering", len(data_after_filter))
-        return data_after_filter
+            )
+        return sub_data
 
     @staticmethod
     def save_mapped_confidence_json(

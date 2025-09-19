@@ -21,7 +21,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from joblib import Parallel, delayed
+from joblib import delayed, Parallel
+from pxmeter.configs.run_config import RUN_CONFIG
+from pxmeter.eval import evaluate
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from tqdm import tqdm
@@ -32,8 +34,6 @@ from benchmark.utils import (
     int_to_letters,
     nested_dict_to_sorted_list,
 )
-from pxmeter.configs.run_config import RUN_CONFIG
-from pxmeter.eval import evaluate
 
 
 class BaseEvaluator:
@@ -447,9 +447,12 @@ class BaseEvaluator:
         # List of tuple (name, pdb_id, seed, sample, pred_cif, confidence_json)
         data = self.load_all_cif_and_confidence()
 
-        assert (
-            len(data) > 0
-        ), f"No CIF files available for evaluation were found in {self.pred_dir}"
+        if len(data) == 0:
+            logging.info(
+                "No CIF files available for evaluation were found in %s, exit",
+                self.pred_dir,
+            )
+            return
 
         # Shuffle data to prevent OutOfMemory from large structures.
         random.seed(42)

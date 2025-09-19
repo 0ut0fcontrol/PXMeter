@@ -208,9 +208,12 @@ def _find_result_csv(dataset_names: list[str]) -> dict[str, dict[str, Path]]:
                 logging.warning("%s does not exist", eval_result_dir)
                 continue
 
-            result_csv = Path(
-                eval_result_dir.parent / f"{eval_result_dir.name}_metrics.csv"
-            )
+            if eval_result_dir.name.endswith(".csv"):
+                result_csv = eval_result_dir
+            else:
+                result_csv = Path(
+                    eval_result_dir.parent / f"{eval_result_dir.name}_metrics.csv"
+                )
 
             dataset_to_result_files[eval_dataset][dataset_name] = result_csv
     return dataset_to_result_files

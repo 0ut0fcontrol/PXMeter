@@ -462,6 +462,21 @@ def run_aggregator(
 
     all_metrics_df = pd.concat(all_metrics_df_list)
 
+    def strfloat_to_strint(x):
+        if pd.isna(x):
+            return x
+        try:
+            return str(int(float(x)))
+        except ValueError:
+            return x
+
+    all_metrics_df["entity_id_1"] = all_metrics_df["entity_id_1"].apply(
+        strfloat_to_strint
+    )
+    all_metrics_df["entity_id_2"] = all_metrics_df["entity_id_2"].apply(
+        strfloat_to_strint
+    )
+
     if cluster_csv:
         all_metrics_df = add_cluster_id_to_metrics_df(
             cluster_csv, all_metrics_df, interface_only_use_polymer_cluster

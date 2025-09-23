@@ -90,9 +90,9 @@ def reduce_dockq_csv(dockq_csv: Path | str) -> pd.DataFrame:
         new_sub_eval_type_df = sub_eval_type_df.rename(
             columns={"avg_dockq_sr_avg_sr": new_col_name}
         )
-        num_cols[new_col_name] = (
-            f'{eval_type_df["entry_id_num"].iloc[0]}/{eval_type_df["cluster_num"].iloc[0]}'
-        )
+        num_cols[
+            new_col_name
+        ] = f'{eval_type_df["entry_id_num"].iloc[0]}/{eval_type_df["cluster_num"].iloc[0]}'
         df_list.append(new_sub_eval_type_df)
 
     new_df = df_list[0]
@@ -131,9 +131,9 @@ def reduce_lddt_csv(lddt_csv: Path | str) -> pd.DataFrame:
             new_col_name = f"[{eval_dataset}]{EVAL_TYPE_MAP.get(eval_type, eval_type)}"
 
         new_sub_eval_type_df = sub_eval_type_df.rename(columns={"lddt": new_col_name})
-        num_cols[new_col_name] = (
-            f'{eval_type_df["entry_id_num"].iloc[0]}/{eval_type_df["cluster_num"].iloc[0]}'
-        )
+        num_cols[
+            new_col_name
+        ] = f'{eval_type_df["entry_id_num"].iloc[0]}/{eval_type_df["cluster_num"].iloc[0]}'
         df_list.append(new_sub_eval_type_df)
 
     new_df = df_list[0]
@@ -231,6 +231,128 @@ def reduce_csv_content(
     return df_reordered, table_str
 
 
+def rank_results_df(result_df: pd.DataFrame, metrics_col: str) -> pd.DataFrame:
+    """
+    Rank evaluation results within grouped subsets of a DataFrame.
+
+    Groups results by evaluation metadata (dataset, subset, type, ranker), sorts
+    models by a specified metric in descending order, and generates a ranked
+    string list of models with their scores.
+
+    Args:
+        result_df (pd.DataFrame): Input DataFrame containing evaluation results.
+                    Must include at least the following columns:
+                    - "eval_dataset"
+                    - "eval_type"
+                    - "ranker"
+                    - "name"
+                    - metrics_col (specified)
+                    Optionally "subset". If absent, a default value "All" is added.
+        metrics_col (str): Name of the column containing metric values to rank by.
+
+    Returns:
+        pd.DataFrame: A DataFrame with the same grouping columns plus a "rank"
+        column, where each entry is a string of ranked models in the format
+        "model_name (metric_value) > ...".
+    """
+    if "subset" not in result_df.columns:
+        result_df["subset"] = "All"
+
+    GROUP_COLS = ["eval_dataset", "subset", "eval_type", "ranker"]
+
+    results = []
+    for group, sub_df in result_df.groupby(GROUP_COLS):
+        sorted_sub_df = sub_df.sort_values(by=metrics_col, ascending=False)
+        rank_list = []
+        for _, row in sorted_sub_df.iterrows():
+            row_str = f"{row['name']} ({row[metrics_col]})"
+            rank_list.append(row_str)
+        results.append(list(group) + [" > ".join(rank_list)])
+
+    result_rank_df = pd.DataFrame(results, columns=GROUP_COLS + ["rank"])
+    return result_rank_df
+
+
+def get_ranked_results(
+    dockq_csv: Path | str | None = None,
+    lddt_csv: Path | str | None = None,
+    output_csv: Path | str | None = None,
+):
+    """
+    Generate ranked evaluation results from DockQ and/or LDDT CSV files.
+
+    Reads DockQ and LDDT evaluation CSVs if provided, computes ranking tables
+    using rank_results_df, and combines them into a single DataFrame. The
+    resulting DataFrame is sorted and written to a CSV file.
+
+    Args:
+        dockq_csv (Path | str | None): Path to a DockQ evaluation CSV file. If
+        None or file does not exist, it is skipped.
+        lddt_csv (Path | str | None): Path to an LDDT evaluation CSV file. If
+        None or file does not exist, it is skipped.
+        output_csv (Path | str | None): Path to the output CSV file containing
+        ranked results. Must be provided if ranking results are to be saved.
+    """
+    df_list = []
+    if dockq_csv is not None and Path(dockq_csv).exists():
+        dockq_df = pd.read_csv(dockq_csv)
+        ranked_dockq_df = rank_results_df(dockq_df, metrics_col="avg_dockq_sr_avg_sr")
+        ranked_dockq_df.insert(0, "metric", "DockQ_SR")
+        df_list.append(ranked_dockq_df)
+
+    if lddt_csv is not None and Path(lddt_csv).exists():
+        lddt_df = pd.read_csv(lddt_csv)
+        ranked_lddt_df = rank_results_df(lddt_df, metrics_col="lddt")
+        ranked_lddt_df.insert(0, "metric", "LDDT")
+        df_list.append(ranked_lddt_df)
+
+    output_df = pd.concat(df_list)
+    output_df.sort_values(
+        by=["metric", "ranker", "eval_dataset", "subset", "eval_type"], inplace=True
+    )
+    output_df.to_csv(output_csv, index=False, quoting=csv.QUOTE_NONNUMERIC)
+
+
+def run_reduce(
+    output_summary_csv: Path,
+    output_ranked_csv: Path,
+    dockq_csv: Path | None = None,
+    lddt_csv: Path | None = None,
+    rmsd_csv: Path | None = None,
+):
+    """
+    Aggregate and summarize evaluation results, then produce ranked tables.
+
+    Reduces multiple evaluation result CSVs (DockQ, LDDT, RMSD) into a summary
+    table and corresponding ranked results. Writes both CSV and text summary
+    files, as well as ranked results in CSV format.
+
+    Args:
+        output_summary_csv (Path): Path where the reduced summary CSV file will
+        be saved.
+        output_ranked_csv (Path): Path where the ranked results CSV file will
+        be saved.
+        dockq_csv (Path | None): Optional path to DockQ evaluation CSV file.
+        lddt_csv (Path | None): Optional path to LDDT evaluation CSV file.
+        rmsd_csv (Path | None): Optional path to RMSD evaluation CSV file.
+    """
+    table_df, table_str = reduce_csv_content(dockq_csv, lddt_csv, rmsd_csv)
+
+    output_summary_csv.parent.mkdir(exist_ok=True, parents=True)
+    table_df.to_csv(
+        output_summary_csv,
+        index=False,
+        quoting=csv.QUOTE_NONNUMERIC,
+    )
+
+    # Summary to a string of table
+    with open(output_summary_csv.with_suffix(".txt"), "w") as f:
+        f.write(table_str)
+
+    output_ranked_csv.parent.mkdir(exist_ok=True, parents=True)
+    get_ranked_results(dockq_csv, lddt_csv, output_csv=output_ranked_csv)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--dockq_csv", type=Path, default=None)
@@ -240,17 +362,12 @@ if __name__ == "__main__":
     parser.add_argument("-n", "--out_file_name", type=str, default="Summary_table")
     args = parser.parse_args()
 
-    table_df, table_str = reduce_csv_content(
-        args.dockq_csv, args.lddt_csv, args.rmsd_csv
+    output_summary_csv_path = args.output_path / f"{args.out_file_name}.csv"
+    output_ranked_csv_path = args.output_path / f"{args.out_file_name}_ranked.csv"
+    run_reduce(
+        output_summary_csv_path,
+        output_ranked_csv_path,
+        dockq_csv=args.dockq_csv,
+        lddt_csv=args.lddt_csv,
+        rmsd_csv=args.rmsd_csv,
     )
-
-    args.output_path.mkdir(parents=True, exist_ok=True)
-    table_df.to_csv(
-        args.output_path / f"{args.out_file_name}.csv",
-        index=False,
-        quoting=csv.QUOTE_NONNUMERIC,
-    )
-
-    # Summary to a string of table
-    with open(args.output_path / f"{args.out_file_name}.txt", "w") as f:
-        f.write(table_str)

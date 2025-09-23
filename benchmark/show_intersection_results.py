@@ -27,7 +27,7 @@ from tqdm import tqdm
 from benchmark.aggregator import run_aggregator
 from benchmark.configs.data_config import EVAL_RESULTS, SUPPORTED_DATA
 from benchmark.show_results import ChainInterfaceDisplayer, RMSDDisplayer
-from benchmark.simplified_results import reduce_csv_content
+from benchmark.simplified_results import run_reduce
 
 
 def get_antibody_entities():
@@ -933,14 +933,11 @@ def run(
         overwrite=overwrite_agg,
     )
 
-    table_df, table_str = reduce_csv_content(dockq_csv, lddt_csv, rmsd_csv)
-    table_df.to_csv(
-        output_path / f"{out_file_name}.csv", index=False, quoting=csv.QUOTE_NONNUMERIC
+    output_summary_csv_path = output_path / f"{out_file_name}.csv"
+    output_ranked_csv_path = output_path / f"{out_file_name}_ranked.csv"
+    run_reduce(
+        output_summary_csv_path, output_ranked_csv_path, dockq_csv, lddt_csv, rmsd_csv
     )
-
-    # Summary to a string of table
-    with open(output_path / f"{out_file_name}.txt", "w") as f:
-        f.write(table_str)
 
 
 if __name__ == "__main__":

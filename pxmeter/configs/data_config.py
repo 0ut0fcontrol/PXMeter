@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import gzip
 import json
 import logging
 import os
-import subprocess as sp
 from pathlib import Path
 
 import gemmi
+import requests
 
 logging.basicConfig(level=logging.INFO)
 
@@ -30,27 +31,21 @@ def download_ccd_cif(output_path: Path):
     Args:
         output_path (Path): The output path for saving the downloaded CCD CIF file.
     """
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.mkdir(parents=True, exist_ok=True)
 
     logging.info("Downloading CCD CIF file from rcsb.org ...")
 
-    output_cif_gz = output_path / "components.cif.gz"
-    if output_cif_gz.exists():
-        logging.info("Remove old zipped CCD CIF file: %s", output_cif_gz)
-        output_cif_gz.unlink()
-
-    output_cif = output_cif_gz.with_suffix("")
+    output_cif = output_path / "components.cif"
     if output_cif.exists():
         logging.info("Remove old CCD CIF file: %s", output_cif)
         output_cif.unlink()
 
-    sp.run(
-        f"wget https://files.wwpdb.org/pub/pdb/data/monomers/components.cif.gz -P {output_path}",
-        shell=True,
-        check=True,
-    )
-
-    sp.run(f"gunzip -d {output_cif_gz}", shell=True, check=True)
+    url = "https://files.wwpdb.org/pub/pdb/data/monomers/components.cif.gz"
+    with requests.get(url, stream=True, timeout=60) as r:
+        r.raise_for_status()
+        with gzip.GzipFile(fileobj=r.raw) as f_in, output_cif.open("wb") as f_out:
+            for chunk in iter(lambda: f_in.read(8192), b""):
+                f_out.write(chunk)
 
     logging.info("Download CCD CIF file successfully: %s", output_cif)
 

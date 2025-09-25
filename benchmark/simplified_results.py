@@ -246,6 +246,8 @@ def rank_results_df(result_df: pd.DataFrame, metrics_col: str) -> pd.DataFrame:
                     - "eval_type"
                     - "ranker"
                     - "name"
+                    - "entry_id_num"
+                    - "cluster_num"
                     - metrics_col (specified)
                     Optionally "subset". If absent, a default value "All" is added.
         metrics_col (str): Name of the column containing metric values to rank by.
@@ -258,18 +260,26 @@ def rank_results_df(result_df: pd.DataFrame, metrics_col: str) -> pd.DataFrame:
     if "subset" not in result_df.columns:
         result_df["subset"] = "All"
 
-    GROUP_COLS = ["eval_dataset", "subset", "eval_type", "ranker"]
+    group_cols = ["eval_dataset", "subset", "eval_type", "ranker"]
 
     results = []
-    for group, sub_df in result_df.groupby(GROUP_COLS):
+    for group, sub_df in result_df.groupby(group_cols):
+        group_list = list(group)
         sorted_sub_df = sub_df.sort_values(by=metrics_col, ascending=False)
+        entry_id_num = sub_df["entry_id_num"].iloc[0]
+        cluster_id_num = sub_df["cluster_num"].iloc[0]
+
         rank_list = []
         for _, row in sorted_sub_df.iterrows():
             row_str = f"{row['name']} ({row[metrics_col]})"
             rank_list.append(row_str)
-        results.append(list(group) + [" > ".join(rank_list)])
+        results.append(
+            group_list + [entry_id_num, cluster_id_num] + [" > ".join(rank_list)]
+        )
 
-    result_rank_df = pd.DataFrame(results, columns=GROUP_COLS + ["rank"])
+    result_rank_df = pd.DataFrame(
+        results, columns=group_cols + ["entry_id_num", "cluster_num", "rank"]
+    )
     return result_rank_df
 
 

@@ -741,6 +741,30 @@ def save_all_results(
             else:
                 sub_metrics_df = metrics_df.copy()
 
+            # Integrity check
+            incomplete_entries = set()
+            all_set = set(sub_metrics_df["entry_id"])
+            for seed in sub_metrics_df["seed"].unique():
+                for sample in sub_metrics_df["sample"].unique():
+                    failed = all_set - set(
+                        sub_metrics_df["entry_id"][
+                            (sub_metrics_df["seed"] == seed)
+                            & (sub_metrics_df["sample"] == sample)
+                        ]
+                    )
+                    incomplete_entries |= failed
+
+            if incomplete_entries:
+                logging.warning(
+                    "%d entries are incomplete (N_seed * N_sample) in %s; "
+                    "dropping them before dataset intersection",
+                    len(incomplete_entries),
+                    dataset_name,
+                )
+                sub_metrics_df = sub_metrics_df[
+                    ~sub_metrics_df["entry_id"].isin(incomplete_entries)
+                ]
+
             # Add "match_key" column to the DataFrame
             # In the JSON file output by PXMeter,
             # the chain_id pair for the interfaces has already been sorted

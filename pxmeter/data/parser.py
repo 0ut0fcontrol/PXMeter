@@ -360,6 +360,13 @@ class MMCIFParser:
             # First obtain all altlocs, then filter them
             tmp_altloc = "all"
 
+        if tmp_altloc == "all":
+            logging.warning(
+                "Bond computation is not supported with `altloc='all'`."
+                "include_bonds will be set to False."
+            )
+            include_bonds = False
+
         if assembly_id is None:
             atom_array = pdbx.get_structure(
                 pdbx_file=self.cif,

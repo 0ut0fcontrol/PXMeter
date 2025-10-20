@@ -997,6 +997,7 @@ class MappingResult:
         ref_altloc: str = "first",
         ref_model: int = 1,
         model_chain_id_to_lig_mol: dict[str, Chem.Mol] | None = None,
+        chain_mapping: dict[str, str] | None = None,
         mapping_config: ConfigDict = RUN_CONFIG.mapping,
     ) -> "MappingResult":
         """
@@ -1010,6 +1011,8 @@ class MappingResult:
             ref_model (int): Model number for the reference structure. Defaults to 1.
             model_chain_id_to_lig_mol (dict[str, Chem.Mol], optional): Mapping of model chain IDs
                 to ligand molecules. Defaults to None.
+            chain_mapping (dict[str, str], optional): Mapping of model chain IDs to reference chain IDs.
+                            Defaults to None.
             mapping_config (ConfigDict, optional): Configuration for the mapping process.
                             Defaults to RUN_CONFIG.mapping.
 
@@ -1035,7 +1038,15 @@ class MappingResult:
             model_to_ref_entity_id,
             enumerate_all_anchors=mapping_config.enumerate_all_anchors,
         )
-        chain_mapping, chain_mapping_anchors = chain_perm.get_heurisitic_chain_mapping()
+
+        if not chain_mapping:
+            (
+                chain_mapping,
+                chain_mapping_anchors,
+            ) = chain_perm.get_heurisitic_chain_mapping()
+        else:
+            chain_mapping_anchors = {}
+
         (
             chain_perm_ref_indices,
             chain_perm_model_indices,

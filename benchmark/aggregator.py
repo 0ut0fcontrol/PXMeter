@@ -54,8 +54,13 @@ class ResultJsonToDataFrame:
 
     @staticmethod
     def _read_json(json_f: Path | str) -> dict[str, Any]:
-        with open(json_f) as f:
-            content = json.load(f)
+        try:
+            with open(json_f) as f:
+                content = json.load(f)
+        except json.JSONDecodeError:
+            logging.error("Error decoding JSON from %s", json_f)
+            return {}
+
         return content
 
     def _get_mapping_info(self) -> tuple[dict[str, str], ...]:

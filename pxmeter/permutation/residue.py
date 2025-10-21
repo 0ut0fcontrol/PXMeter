@@ -222,7 +222,7 @@ class ResiduePermutation:
             v = rmsd(transformed, ref_centers)
             if v < best_rmsd:
                 best_rmsd = v
-                best_perm = ordered
+                best_perm = ids
 
         return best_perm
 

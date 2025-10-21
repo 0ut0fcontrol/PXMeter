@@ -124,7 +124,6 @@ If you use PXMeter in your research, please cite the following:
 
 
 ## 🚧 Limitations
-- PXMeter supports chain/atom permutations but not residue-level permutations. As a result, the accuracy of evaluation for branched chains, such as glycans, cannot be fully guaranteed.
 - It is recommended to use CIF files from the RCSB PDB as references, as they ensure content accuracy. All development and testing were conducted exclusively on CIF files from this source.
 
 

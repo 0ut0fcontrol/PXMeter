@@ -37,6 +37,7 @@ from pxmeter.data.utils import (
 )
 from pxmeter.permutation.atom import AtomPermutation
 from pxmeter.permutation.chain import ChainPermutation
+from pxmeter.permutation.residue import ResiduePermutation
 
 
 class MappingCIF:
@@ -968,25 +969,20 @@ class MappingResult:
 
     ref_struct: Structure
     model_struct: Structure
-    ref_indices: np.ndarray
-    model_indices: np.ndarray
+    mapped_ref_struct: Structure
+    mapped_model_struct: Structure
     chain_mapping: dict[str, str]
     chain_mapping_anchors: dict[str, str]
     model_to_ref_entity_id: dict[str, str]
 
     def get_mapped_structures(self) -> tuple[Structure, Structure]:
         """
-        Selects and returns substructures from reference and model structures based on specified indices.
+        Returns the mapped reference and model structures.
 
         Returns:
-            tuple: A tuple containing two substructures:
-                - sele_ref_struct: The selected substructure from the reference structure.
-                - sele_model_struct: The selected substructure from the model structure.
+            tuple[Structure, Structure]: A tuple containing the mapped reference and model structures.
         """
-
-        sele_ref_struct = self.ref_struct.select_substructure(self.ref_indices)
-        sele_model_struct = self.model_struct.select_substructure(self.model_indices)
-        return sele_ref_struct, sele_model_struct
+        return self.mapped_ref_struct, self.mapped_model_struct
 
     @classmethod
     def from_cifs(
@@ -1052,17 +1048,37 @@ class MappingResult:
             chain_perm_model_indices,
         ) = chain_perm.get_permuted_indices(chain_mapping)
 
+        chain_permed_ref_struct = map_cif.ref_struct.select_substructure(
+            chain_perm_ref_indices
+        )
+        chain_permed_model_struct = map_cif.model_struct.select_substructure(
+            chain_perm_model_indices
+        )
+
+        residue_perm = ResiduePermutation(
+            chain_permed_ref_struct,
+            chain_permed_model_struct,
+        )
+        residue_permuted_indices = residue_perm.run()
+        chain_permed_model_struct.reset_atom_array_annot(
+            "coord",
+            chain_permed_model_struct.atom_array.coord[residue_permuted_indices],
+        )
+
         atom_perm = AtomPermutation(
-            map_cif.ref_struct.select_substructure(chain_perm_ref_indices),
-            map_cif.model_struct.select_substructure(chain_perm_model_indices),
+            chain_permed_ref_struct,
+            chain_permed_model_struct,
         )
         atom_permuted_indices = atom_perm.run()
+        permed_model_struct = chain_permed_model_struct.select_substructure(
+            atom_permuted_indices
+        )
 
         return cls(
             ref_struct=map_cif.ref_struct,
             model_struct=map_cif.model_struct,
-            ref_indices=chain_perm_ref_indices,
-            model_indices=chain_perm_model_indices[atom_permuted_indices],
+            mapped_ref_struct=chain_permed_ref_struct,
+            mapped_model_struct=permed_model_struct,
             chain_mapping=chain_mapping,
             chain_mapping_anchors=chain_mapping_anchors,
             model_to_ref_entity_id=model_to_ref_entity_id,

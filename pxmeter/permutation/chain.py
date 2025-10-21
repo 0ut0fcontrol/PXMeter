@@ -29,11 +29,11 @@ class ChainPermutation:
     already aligned chains.
 
     Args:
-            ref_struct (Structure): Reference structure object
-            model_struct (Structure): Model structure object
-            model_to_ref_entity_id (dict[str, str]): Mapping of model entity IDs
-                                    to reference entity IDs
-            enumerate_all_anchors (bool): Whether to enumerate all anchor chains.
+        ref_struct (Structure): Reference structure object
+        model_struct (Structure): Model structure object
+        model_to_ref_entity_id (dict[str, str]): Mapping of model entity IDs
+                                to reference entity IDs
+        enumerate_all_anchors (bool): Whether to enumerate all anchor chains.
     """
 
     def __init__(

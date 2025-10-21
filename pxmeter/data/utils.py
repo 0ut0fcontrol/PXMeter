@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from collections import Counter
+from datetime import datetime
 
 import biotite.sequence as seq
 import biotite.sequence.align as align
@@ -266,3 +267,59 @@ def get_mol_graph_matches(
         if num >= max_matches:
             break
     return matches
+
+
+def get_res_graph_matches(
+    res_graph1: nx.Graph, res_graph2: nx.Graph, max_matches: int = 1000
+) -> list[dict]:
+    """
+    Find subgraph isomorphisms between two residue-level graphs using residue names.
+
+    This function enumerates mappings where a subgraph of `res_graph1` is isomorphic to
+    (i.e., can be relabeled to match) `res_graph2`. Node equivalence is determined
+    solely by the `"res_name"` node attribute; all other node or edge attributes are ignored.
+    Enumeration stops once `max_matches` mappings have been collected.
+
+    Args:
+        res_graph1 (nx.Graph): The source (typically larger) residue graph.
+            Node attribute required: ``"res_name"`` (e.g., "ALA", "NAG").
+        res_graph2 (nx.Graph): The target (typically smaller) residue graph to match against.
+            Node attribute required: ``"res_name"``.
+        max_matches (int, optional): Maximum number of mappings to return. Defaults to ``1000``.
+
+    Returns:
+        list[dict]: A list of node-mapping dicts. Each dict maps node IDs from `res_graph1`
+        (keys) to node IDs in `res_graph2` (values) representing one subgraph isomorphism.
+    """
+    isomatcher = nx.algorithms.isomorphism.GraphMatcher(
+        res_graph1,
+        res_graph2,
+        node_match=lambda x, y: (x["res_name"] == y["res_name"])
+        and (x["atom_names"] == y["atom_names"]),
+    )
+
+    matches = []
+    num = 0
+    for i in isomatcher.subgraph_isomorphisms_iter():
+        matches.append(i)
+        num += 1
+        if num >= max_matches:
+            break
+    return matches
+
+
+def is_valid_date_format(date_string: str) -> bool:
+    """
+    Check if the date string is in the format yyyy-mm-dd.
+
+    Args:
+        date_string (str): The date string to check.
+
+    Returns:
+        bool: True if the date string is in the format yyyy-mm-dd, False otherwise.
+    """
+    try:
+        datetime.strptime(date_string, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False

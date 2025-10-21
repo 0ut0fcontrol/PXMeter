@@ -24,8 +24,8 @@ class AtomPermutation:
     Generating and applying atom permutations based on a reference structure.
 
     Args:
-            ref_struct (Structure): The reference structure used for permutation generation.
-            model_struct (Structure): The model structure used for permutation application.
+        ref_struct (Structure): The reference structure used for permutation generation.
+        model_struct (Structure): The model structure used for permutation application.
     """
 
     def __init__(self, ref_struct: Structure, model_struct: Structure):

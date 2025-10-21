@@ -96,6 +96,41 @@ class Structure:
             cif_block=cif_parser.cif.block,
         )
 
+    @classmethod
+    def from_atom_array(
+        cls,
+        atom_array: AtomArray,
+        entity_poly_seq: dict[str, str],
+        entity_poly_type: dict[str, str],
+        entry_id: str = "",
+        exptl_methods: tuple[str] = tuple(),
+        cif_block: dict = None,
+    ) -> "Structure":
+        """
+        Create a Structure object from MMCIF.
+
+        Args:
+            mmcif (Path or str): Path to MMCIF file.
+            model (int): Model number. Defaults to 1.
+            altloc (str): It could be one of "all", "first", "occupancy", "A", "B", etc.
+                          Defaults to "first".
+            assembly_id (str, optional): Assembly ID. Defaults to None.
+            include_bonds (bool): Whether to include bonds in the AtomArray. Defaults to True.
+
+        Returns:
+            Structure: Structure object.
+        """
+        return cls(
+            atom_array=atom_array,
+            entity_poly_seq=entity_poly_seq,
+            entity_poly_type=entity_poly_type,
+            uni_chain_id=get_unique_chain_id(atom_array),
+            uni_atom_id=get_unique_atom_id(atom_array),
+            entry_id=entry_id,
+            exptl_methods=exptl_methods,
+            cif_block=cif_block,
+        )
+
     def _get_hydrogens_mask(self) -> np.ndarray:
         """
         Get mask of hydrogens.

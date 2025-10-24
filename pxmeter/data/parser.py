@@ -362,8 +362,8 @@ class MMCIFParser:
 
         if tmp_altloc == "all":
             logging.warning(
-                "Bond computation is not supported with `altloc='all'`."
-                "include_bonds will be set to False."
+                "Bond computation is not supported with `altloc='all'`. "
+                "The include_bonds will be set to False."
             )
             include_bonds = False
 

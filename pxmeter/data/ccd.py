@@ -130,7 +130,6 @@ def get_ccd_mol_from_chain_atom_array(chain_atom_array: AtomArray) -> Chem.Mol:
         Chem.Mol: an RDKit Mol.
     """
     mols = []
-    all_atom_names = []
     res_starts = get_residue_starts(chain_atom_array, add_exclusive_stop=True)
     for start, stop in zip(res_starts[:-1], res_starts[1:]):
         res_name = chain_atom_array.res_name[start]
@@ -142,7 +141,6 @@ def get_ccd_mol_from_chain_atom_array(chain_atom_array: AtomArray) -> Chem.Mol:
             a.SetProp("res_name", res_name)
 
         mols.append(mol)
-        all_atom_names.append(atom_names)
 
     combo_mols = mols[0]
     for mol in mols[1:]:

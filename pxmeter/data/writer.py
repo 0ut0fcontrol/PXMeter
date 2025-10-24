@@ -46,6 +46,8 @@ class CIFWriter:
         self.atom_array_output_mask = atom_array_output_mask
 
     def _get_unresolved_block(self):
+        assert self.atom_array_output_mask is not None
+
         res_starts = get_residue_starts(self.atom_array, add_exclusive_stop=True)
         is_res_starts = np.zeros(len(self.atom_array_output_mask), dtype=bool)
         for start, stop in zip(res_starts[:-1], res_starts[1:]):

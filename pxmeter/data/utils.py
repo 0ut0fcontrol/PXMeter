@@ -63,9 +63,7 @@ def get_unique_atom_id(atom_array: AtomArray) -> np.ndarray:
     Generate unique atom identifiers by combining residue IDs, residue names, and atom names.
 
     Args:
-        res_id (np.ndarray): An array of residue IDs.
-        res_name (np.ndarray): An array of residue names.
-        atom_name (np.ndarray): An array of atom names.
+        atom_array (AtomArray): The input AtomArray containing residue IDs, residue names, and atom names.
 
     Returns:
         np.ndarray: An array of unique atom identifiers, each formed by concatenating
@@ -171,13 +169,15 @@ def get_inter_residue_bonds(atom_array: AtomArray) -> np.ndarray:
         np.ndarray: inter residue bonds, shape = (n,2)
     """
     if atom_array.bonds is None:
-        return np.array([])
-    idx_i = atom_array.bonds._bonds[:, 0]
-    idx_j = atom_array.bonds._bonds[:, 1]
+        return np.empty((0, 2), dtype=int)
+
+    bond_array = atom_array.bonds.as_array()
+    idx_i = bond_array[:, 0]
+    idx_j = bond_array[:, 1]
     chain_id_diff = atom_array.chain_id[idx_i] != atom_array.chain_id[idx_j]
     res_id_diff = atom_array.res_id[idx_i] != atom_array.res_id[idx_j]
     diff_mask = chain_id_diff | res_id_diff
-    inter_residue_bonds = atom_array.bonds._bonds[diff_mask]
+    inter_residue_bonds = bond_array[diff_mask]
     inter_residue_bonds = inter_residue_bonds[:, :2]  # remove bond type
     return inter_residue_bonds
 

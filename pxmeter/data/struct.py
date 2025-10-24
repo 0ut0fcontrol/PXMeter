@@ -478,6 +478,9 @@ class Structure:
         atom_array = self.atom_array
         bond_array = atom_array.bonds.as_array()
 
+        if bond_array is None:
+            return np.empty((0, 3), dtype=int)
+
         polymer_mask = np.isin(
             atom_array.label_entity_id, list(self.entity_poly_type.keys())
         )
@@ -493,7 +496,7 @@ class Structure:
         )[0]
         if lig_polymer_bond_indices.size == 0:
             # no ligand-polymer bonds
-            lig_polymer_bonds = np.empty((0, 3)).astype(int)
+            lig_polymer_bonds = np.empty((0, 3), dtype=int)
         else:
             # np.array([[atom1, atom2, bond_order], ...])
             lig_polymer_bonds = bond_array[lig_polymer_bond_indices]

@@ -476,10 +476,11 @@ class Structure:
                         e.g. np.array([[atom1, atom2, bond_order]...])
         """
         atom_array = self.atom_array
-        bond_array = atom_array.bonds.as_array()
 
-        if bond_array is None:
+        if atom_array.bonds is None:
             return np.empty((0, 3), dtype=int)
+
+        bond_array = atom_array.bonds.as_array()
 
         polymer_mask = np.isin(
             atom_array.label_entity_id, list(self.entity_poly_type.keys())

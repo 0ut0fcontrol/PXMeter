@@ -180,6 +180,7 @@ def reduce_csv_content(
     dockq_csv: Path | str | None = None,
     lddt_csv: Path | str | None = None,
     rmsd_csv: Path | str | None = None,
+    order: list[str] | None = None,
 ) -> tuple[pd.DataFrame, str]:
     """
     Reduce the content of DockQ, LDDT, and RMSD CSV files to a DataFrame and a formatted string.
@@ -188,6 +189,8 @@ def reduce_csv_content(
         dockq_csv (Path or str): The path to the DockQ CSV file.
         lddt_csv (Path or str): The path to the LDDT CSV file.
         rmsd_csv (Path or str): The path to the RMSD CSV file.
+        order (list of str, optional): The order of rankers to be displayed in the DataFrame.
+            Defaults to None.
 
     Returns:
         tuple[pd.DataFrame, str]: A tuple containing the reduced DataFrame and a formatted string.
@@ -215,6 +218,16 @@ def reduce_csv_content(
 
     rows_with_num = total_df[total_df["name"] == "entry_id_num/cluster_num"]
     other_rows = total_df[total_df["name"] != "entry_id_num/cluster_num"]
+
+    if order is not None:
+        rank = {v: i for i, v in enumerate(order)}
+        tmp = other_rows.assign(
+            _key=other_rows["name"].map(rank).fillna(len(order)).astype(int)
+        )
+        other_rows = tmp.sort_values(["_key", "name"], kind="mergesort").drop(
+            columns="_key"
+        )
+
     df_reordered = pd.concat([rows_with_num, other_rows], ignore_index=True)
     columns_to_move = ["name", "ranker"]
 
@@ -329,6 +342,7 @@ def run_reduce(
     dockq_csv: Path | None = None,
     lddt_csv: Path | None = None,
     rmsd_csv: Path | None = None,
+    order: list[str] | None = None,
 ):
     """
     Aggregate and summarize evaluation results, then produce ranked tables.
@@ -345,8 +359,10 @@ def run_reduce(
         dockq_csv (Path | None): Optional path to DockQ evaluation CSV file.
         lddt_csv (Path | None): Optional path to LDDT evaluation CSV file.
         rmsd_csv (Path | None): Optional path to RMSD evaluation CSV file.
+        order (list[str] | None): Optional list of dataset names to order the
+            summary table. If None, default ordering is used.
     """
-    table_df, table_str = reduce_csv_content(dockq_csv, lddt_csv, rmsd_csv)
+    table_df, table_str = reduce_csv_content(dockq_csv, lddt_csv, rmsd_csv, order=order)
 
     output_summary_csv.parent.mkdir(exist_ok=True, parents=True)
     table_df.to_csv(

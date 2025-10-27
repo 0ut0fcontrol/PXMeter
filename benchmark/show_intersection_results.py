@@ -960,7 +960,12 @@ def run(
     output_summary_csv_path = output_path / f"{out_file_name}.csv"
     output_ranked_csv_path = output_path / f"{out_file_name}_ranked.csv"
     run_reduce(
-        output_summary_csv_path, output_ranked_csv_path, dockq_csv, lddt_csv, rmsd_csv
+        output_summary_csv_path,
+        output_ranked_csv_path,
+        dockq_csv,
+        lddt_csv,
+        rmsd_csv,
+        order=dataset_names,
     )
 
 

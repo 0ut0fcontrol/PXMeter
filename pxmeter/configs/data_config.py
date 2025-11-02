@@ -16,6 +16,7 @@ import gzip
 import json
 import logging
 import os
+from functools import lru_cache
 from pathlib import Path
 
 import gemmi
@@ -107,10 +108,18 @@ if not ONE_LETTER_CODE_JSON.exists() or not CCD_BLOCKS_JSON.exists():
         COMPONENTS_FILE, CCD_BLOCKS_JSON, ONE_LETTER_CODE_JSON
     )
 
-logging.debug("Load CCD one-letter code from: %s", ONE_LETTER_CODE_JSON)
-with open(ONE_LETTER_CODE_JSON, "r") as f:
-    CCD_ONE_LETTER_CODE = json.load(f)
+
+@lru_cache(maxsize=None)
+def get_ccd_one_letter_code():
+    logging.debug("Load CCD one-letter code from: %s", ONE_LETTER_CODE_JSON)
+    with open(ONE_LETTER_CODE_JSON, "r") as f:
+        ccd_one_letter_code = json.load(f)
+    return ccd_one_letter_code
 
 
-with open(CCD_BLOCKS_JSON, "r") as f:
-    CCD_BLOCKS = json.load(f)
+@lru_cache(maxsize=None)
+def get_ccd_blocks():
+    logging.debug("Load CCD blocks from: %s", CCD_BLOCKS_JSON)
+    with open(CCD_BLOCKS_JSON, "r") as f:
+        ccd_blocks = json.load(f)
+    return ccd_blocks

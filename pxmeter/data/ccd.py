@@ -24,7 +24,7 @@ from pdbeccdutils.core import ccd_reader
 from rdkit import Chem
 from rdkit.Geometry import Point3D
 
-from pxmeter.configs.data_config import CCD_BLOCKS
+from pxmeter.configs.data_config import get_ccd_blocks
 from pxmeter.data.utils import (
     get_inter_residue_bonds,
     get_mol_graph_matches,
@@ -47,7 +47,7 @@ def get_ccd_mol_from_cif(ccd_code: str) -> Chem.Mol:
                               Returns None if the CCD code is not found.
     """
     try:
-        ccd_block = gemmi.cif.read_string(CCD_BLOCKS[ccd_code])[0]
+        ccd_block = gemmi.cif.read_string(get_ccd_blocks()[ccd_code])[0]
     except KeyError:
         return
     ccd_reader_result = ccd_reader._parse_pdb_mmcif(ccd_block, sanitize=True)

@@ -207,7 +207,7 @@ class Structure:
             np.ndarray: Mask of polymer atoms.
         """
         polyer_mask = np.isin(
-            self.atom_array.label_entity_id, self.entity_poly_seq.keys()
+            self.atom_array.label_entity_id, list(self.entity_poly_seq.keys())
         )
         return polyer_mask
 

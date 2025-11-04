@@ -17,14 +17,13 @@ import functools
 import logging
 from typing import Any
 
-import gemmi
 import numpy as np
+from biotite.interface.rdkit import to_mol
 from biotite.structure import AtomArray, get_residue_starts
-from pdbeccdutils.core import ccd_reader
+from biotite.structure.info import get_from_ccd, residue
 from rdkit import Chem
 from rdkit.Geometry import Point3D
 
-from pxmeter.configs.data_config import get_ccd_blocks
 from pxmeter.data.utils import (
     get_inter_residue_bonds,
     get_mol_graph_matches,
@@ -34,7 +33,22 @@ from pxmeter.data.utils import (
 logging.getLogger("rdkit").setLevel(logging.ERROR)
 
 
-@functools.lru_cache
+@functools.lru_cache(maxsize=1024)
+def get_ccd_one_letter_code(res_name):
+    """
+    Retrieve the one-letter code of a residue from the Chemical Component Dictionary (CCD).
+
+    Args:
+        res_name (str): The residue name (three-letter code) to query, e.g., "ALA" or "LYS".
+
+    Returns:
+        str: The corresponding one-letter amino acid code if available, otherwise an empty string or None.
+    """
+    one = get_from_ccd("chem_comp", res_name, "one_letter_code").as_item()
+    return one
+
+
+@functools.lru_cache(maxsize=1024)
 def get_ccd_mol_from_cif(ccd_code: str) -> Chem.Mol:
     """
     Retrieve a molecular object from a CCD CIF file using the given CCD code.
@@ -46,13 +60,11 @@ def get_ccd_mol_from_cif(ccd_code: str) -> Chem.Mol:
         mol (Chem.Mol): The RDKit molecule object corresponding to the given CCD code.
                               Returns None if the CCD code is not found.
     """
-    try:
-        ccd_block = gemmi.cif.read_string(get_ccd_blocks()[ccd_code])[0]
-    except KeyError:
-        return
-    ccd_reader_result = ccd_reader._parse_pdb_mmcif(ccd_block, sanitize=True)
-    mol = ccd_reader_result.component.mol
-    mol.atom_map = {atom.GetProp("name"): atom.GetIdx() for atom in mol.GetAtoms()}
+    ccd_atom_array = residue(ccd_code, allow_missing_coord=True)
+    mol = to_mol(ccd_atom_array)
+    mol.atom_map = {
+        atom.GetPDBResidueInfo().GetName(): atom.GetIdx() for atom in mol.GetAtoms()
+    }
     return mol
 
 

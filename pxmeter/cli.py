@@ -16,14 +16,8 @@ import sys
 from pathlib import Path
 
 import click
+from biotite import setup_ccd
 
-from pxmeter.configs.data_config import (
-    CCD_BLOCKS_JSON,
-    COMPONENTS_FILE,
-    download_ccd_cif,
-    make_precomputed_json_from_ccd,
-    ONE_LETTER_CODE_JSON,
-)
 from pxmeter.eval import evaluate, MetricResult
 from pxmeter.utils import read_chain_id_to_mol_from_json
 
@@ -176,7 +170,4 @@ def update():
     """
     Update the CCD database.
     """
-    download_ccd_cif(output_path=COMPONENTS_FILE.parent)
-    make_precomputed_json_from_ccd(
-        COMPONENTS_FILE, CCD_BLOCKS_JSON, ONE_LETTER_CODE_JSON
-    )
+    setup_ccd.main()

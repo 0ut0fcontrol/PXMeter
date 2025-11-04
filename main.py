@@ -14,6 +14,7 @@
 
 import argparse
 import logging
+import time
 from pathlib import Path
 
 from pxmeter.cli import run_eval_cif
@@ -83,7 +84,7 @@ if __name__ == "__main__":
         help="Whether to output the mapped CIF file. Defaults to False.",
     )
     args = parser.parse_args()
-
+    time_start = time.time()
     run_eval_cif(
         ref_cif=args.ref_cif,
         model_cif=args.model_cif,
@@ -95,3 +96,6 @@ if __name__ == "__main__":
         chain_id_to_mol_json=args.chain_id_to_mol_json,
         output_mapped_cif=args.output_mapped_cif,
     )
+    time_end = time.time()
+    logging.info("Save results to %s" % args.output_json)
+    logging.info("Evaluation time: %.2f seconds" % (time_end - time_start))

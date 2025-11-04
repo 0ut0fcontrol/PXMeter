@@ -31,7 +31,7 @@ from biotite.structure import (
 )
 from biotite.structure.io.pdbx.component import MaskValue
 
-from pxmeter.configs.data_config import get_ccd_one_letter_code
+from pxmeter.data.ccd import get_ccd_one_letter_code
 
 
 class MMCIFParser:
@@ -188,8 +188,8 @@ class MMCIFParser:
         """
         seq = ""
         for res_name in res_names:
-            one = get_ccd_one_letter_code().get(res_name, "X")
-            one = "X" if len(one) > 1 else one
+            one = get_ccd_one_letter_code(res_name)
+            one = "X" if one is None or one == "?" or len(one) > 1 else one
             seq += one
         return seq
 

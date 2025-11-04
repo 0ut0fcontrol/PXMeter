@@ -32,7 +32,7 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-PXMeter will automatically download the Chemical Component Dictionary (CCD) upon its first run. To update the CCD files:
+PXMeter directly uses the Chemical Component Dictionary (CCD) bundled with Biotite. To update the CCD files:
 
 ```bash
 pxm ccd update

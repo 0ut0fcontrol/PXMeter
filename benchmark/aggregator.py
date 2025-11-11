@@ -21,9 +21,10 @@ from typing import Any
 
 import pandas as pd
 from joblib import delayed, Parallel
-
 from pxmeter.constants import POLYMER
 from tqdm import tqdm
+
+from benchmark.utils import shrink_dataframe
 
 COMPLEX_METRICS = ["lddt", "clashes"]
 CHAIN_METRICS = ["lddt", "ref_pocket_chain", "lig_rmsd_wo_refl", "pocket_rmsd_wo_refl"]
@@ -487,19 +488,29 @@ def run_aggregator(
             cluster_csv, all_metrics_df, interface_only_use_polymer_cluster
         )
 
-    output_metrics_csv = eval_result_dir.parent / f"{eval_result_dir.name}_metrics.csv"
-    all_metrics_df.to_csv(output_metrics_csv, index=False, quoting=csv.QUOTE_NONNUMERIC)
-    logging.info("Output metrics csv to %s", output_metrics_csv)
+    output_parquet = eval_result_dir.parent / f"{eval_result_dir.name}_metrics.parquet"
+    all_metrics_df, _report = shrink_dataframe(all_metrics_df)
+    all_metrics_df.to_parquet(
+        output_parquet,
+        engine="pyarrow",
+        compression="zstd",
+        index=False,
+    )
+    logging.info("Output metrics parquet to %s", output_parquet)
 
     if len(all_pb_valid_df_list) > 0:
         all_pb_valid_df = pd.concat(all_pb_valid_df_list)
-        output_pb_valid_csv = (
-            eval_result_dir.parent / f"{eval_result_dir.name}_pb_valid.csv"
+        output_pb_valid_parquet = (
+            eval_result_dir.parent / f"{eval_result_dir.name}_pb_valid.parquet"
         )
-        all_pb_valid_df.to_csv(
-            output_pb_valid_csv, index=False, quoting=csv.QUOTE_NONNUMERIC
+        all_pb_valid_df, _report = shrink_dataframe(all_pb_valid_df)
+        all_pb_valid_df.to_parquet(
+            output_pb_valid_parquet,
+            engine="pyarrow",
+            compression="zstd",
+            index=False,
         )
-        logging.info("Output pb valid csv to %s", output_pb_valid_csv)
+        logging.info("Output pb valid parquet to %s", output_pb_valid_parquet)
 
 
 if __name__ == "__main__":

@@ -208,12 +208,16 @@ def _find_result_csv(dataset_names: list[str]) -> dict[str, dict[str, Path]]:
                 logging.warning("%s does not exist", eval_result_dir)
                 continue
 
-            if eval_result_dir.name.endswith(".csv"):
+            if eval_result_dir.name.endswith(".csv") or eval_result_dir.name.endswith(
+                ".parquet"
+            ):
                 result_csv = eval_result_dir
             else:
                 result_csv = Path(
-                    eval_result_dir.parent / f"{eval_result_dir.name}_metrics.csv"
+                    eval_result_dir.parent / f"{eval_result_dir.name}_metrics.parquet"
                 )
+                if result_csv.with_suffix(".csv").exists():
+                    result_csv = result_csv.with_suffix(".csv")
 
             dataset_to_result_files[eval_dataset][dataset_name] = result_csv
     return dataset_to_result_files
@@ -240,7 +244,7 @@ def gen_aggregated_results(
         for _dataset_name, metrics_csv in dataset_name_to_csv_path.items():
             eval_result_dir = metrics_csv.parent / str(metrics_csv.name).replace(
                 "_metrics.csv", ""
-            )
+            ).replace("_metrics.parquet", "")
 
             interface_only_use_polymer_cluster = False
             if eval_dataset == "RecentPDB":
@@ -705,23 +709,37 @@ def save_all_results(
         intersection = subset_match_key.copy()  # Empty set if subset_csv is None
         dataset_name_to_df = {}
         metrics_csv_to_full_df = {}
-        for dataset_name, metrics_csv in dataset_name_to_csv_path.items():
-            if metrics_csv not in metrics_csv_to_full_df:
+        for dataset_name, metrics_file in dataset_name_to_csv_path.items():
+            if metrics_file not in metrics_csv_to_full_df:
                 # Load the CSV and convert "entry_id", "entity_id", "seed", "sample" to string
-                metrics_df = pd.read_csv(
-                    metrics_csv,
-                    dtype={
-                        "entry_id": str,
-                        "entity_id_1": str,
-                        "entity_id_2": str,
-                        "seed": str,
-                        "sample": str,
-                    },
-                    low_memory=False,
-                )
-                metrics_csv_to_full_df[metrics_csv] = metrics_df
+                if metrics_file.suffix == ".csv":
+                    metrics_df = pd.read_csv(
+                        metrics_file,
+                        dtype={
+                            "entry_id": str,
+                            "entity_id_1": str,
+                            "entity_id_2": str,
+                            "seed": str,
+                            "sample": str,
+                        },
+                        low_memory=False,
+                    )
+                else:
+                    metrics_df = pd.read_parquet(
+                        metrics_file,
+                        engine="pyarrow",
+                    )
+                    for col in [
+                        "entry_id",
+                        "entity_id_1",
+                        "entity_id_2",
+                        "seed",
+                        "sample",
+                    ]:
+                        metrics_df[col] = metrics_df[col].astype("string")
+                metrics_csv_to_full_df[metrics_file] = metrics_df
             else:
-                metrics_df = metrics_csv_to_full_df[metrics_csv]
+                metrics_df = metrics_csv_to_full_df[metrics_file]
             logging.info(
                 "%s entries loaded from %s",
                 metrics_df["entry_id"].nunique(),
@@ -768,15 +786,14 @@ def save_all_results(
             # Add "match_key" column to the DataFrame
             # In the JSON file output by PXMeter,
             # the chain_id pair for the interfaces has already been sorted
-            sub_metrics_df["match_key"] = sub_metrics_df.apply(
-                lambda row: "_".join(
-                    [
-                        row["entry_id"],
-                        str(row["chain_id_1"]),
-                        str(row["chain_id_2"]),
-                    ]
-                ),
-                axis=1,
+            sub_metrics_df["match_key"] = (
+                sub_metrics_df["entry_id"]
+                .str.cat(
+                    sub_metrics_df["chain_id_1"].astype("string").fillna("nan"), sep="_"
+                )
+                .str.cat(
+                    sub_metrics_df["chain_id_2"].astype("string").fillna("nan"), sep="_"
+                )
             )
             unique_match_key = set(sub_metrics_df["match_key"])
             if intersection:
@@ -787,7 +804,7 @@ def save_all_results(
             dataset_name_to_df[dataset_name] = sub_metrics_df
 
         # Get intersection results
-        for dataset_name, metrics_csv in dataset_name_to_csv_path.items():
+        for dataset_name, metrics_file in dataset_name_to_csv_path.items():
             model = EVAL_RESULTS[dataset_name]["model"]
             seeds = EVAL_RESULTS[dataset_name].get("seeds")
             sub_metrics_df = dataset_name_to_df[dataset_name]
@@ -799,7 +816,7 @@ def save_all_results(
                 ]
                 assert (
                     len(sub_metrics_df) > 0
-                ), f"No PDB IDs found in the pdb_id_list for {metrics_csv}"
+                ), f"No PDB IDs found in the pdb_id_list for {metrics_file}"
 
             sub_metrics_df = sub_metrics_df[
                 sub_metrics_df["match_key"].isin(intersection)

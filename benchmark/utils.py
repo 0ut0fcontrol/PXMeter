@@ -14,9 +14,10 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 import numpy as np
+import pandas as pd
 from scipy.stats import binomtest, bootstrap
 
 
@@ -200,3 +201,177 @@ def get_binomial_ci(total_num: int, success_num: int) -> tuple[float, float]:
     binomtest_result = binomtest(success_num, total_num).proportion_ci(0.95)
     ci_lower, ci_upper = binomtest_result
     return round(ci_lower, 4), round(ci_upper, 4)
+
+
+def fmt_bytes(n: int) -> str:
+    """Format a byte count into a human-readable string.
+
+    Args:
+        n: Number of bytes.
+
+    Returns:
+        A string formatted with a unit suffix (B, KB, MB, GB, TB, PB).
+    """
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if n < 1024:
+            return f"{n:.2f} {unit}"
+        n /= 1024
+    return f"{n:.2f} PB"
+
+
+def shrink_dataframe(
+    df: pd.DataFrame,
+    *,
+    cat_threshold: int = 256,
+    cat_ratio: float = 0.5,
+    object_to_string: bool = True,
+    downcast_float: bool = True,
+    downcast_int: bool = True,
+    use_nullable_int: bool = True,
+    bool_cast: bool = True,
+    exclude: Iterable[str] = (),
+    report_topk: int = 30,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Downcast and recode columns to minimize memory and file size.
+
+    This function applies a series of safe transformations to reduce memory
+    footprint without changing column semantics:
+    - Booleans: convert 0/1 or True/False to bool/boolean dtypes.
+    - Floats: downcast float64 to float32 (optional).
+    - Integers: downcast int64 to the smallest fitting integer dtype.
+    - Object columns with integer-like values: convert to nullable Int* dtypes.
+    - Low-cardinality text: convert to ``category``.
+    - Other object text: convert to pandas ``string`` (Arrow/Parquet friendly).
+
+    Args:
+        df: Input DataFrame.
+        cat_threshold: If the number of unique non-null values is ≤ this value,
+            convert to ``category``.
+        cat_ratio: Alternatively, if ``nunique / len(df)`` ≤ this ratio,
+            convert to ``category``.
+        object_to_string: Convert remaining ``object`` text columns to
+            pandas ``string`` dtype.
+        downcast_float: If True, downcast ``float64`` to ``float32``.
+        downcast_int: If True, downcast ``int64`` to the smallest fitting
+            signed integer dtype.
+        use_nullable_int: If True, convert integer-like ``object`` columns
+            (possibly with missing values) to nullable ``Int8/16/32/64``.
+        bool_cast: If True, convert 0/1 (non-float) or boolean-like columns to
+            ``bool`` / nullable ``boolean``.
+        exclude: Column names to skip from any transformation.
+        report_topk: Number of columns to include in the per-column memory
+            savings summary.
+
+    Returns:
+        A 2-tuple ``(df_out, report)`` where:
+        - ``df_out``: The transformed DataFrame with reduced memory usage.
+        - ``report``: A dict containing summary metrics:
+            - ``mem_before_bytes`` / ``mem_after_bytes`` / ``mem_saved_bytes``
+            - human-readable counterparts (``*_readable``)
+            - ``shrink_ratio`` (before/after)
+            - ``changed_cols``: mapping of column -> (old_dtype, new_dtype)
+            - ``top_saving_cols``: memory saved by column (top-K)
+
+    Notes:
+        - Conversions are conservative and try to preserve semantics.
+        - For columns critical to numeric precision (e.g., scores), add them to
+          ``exclude`` to prevent downcasting.
+        - The function does not modify the input ``df`` in place.
+
+    Examples:
+        >>> df_small, rpt = shrink_dataframe(df, exclude=["critical_score"])
+        >>> rpt["mem_before_readable"], rpt["mem_after_readable"]
+        ('1.20 GB', '420.00 MB')
+    """
+    src_mem = df.memory_usage(deep=True).sum()
+    out = df.copy()
+
+    excl = set(exclude)
+    changes: dict[str, tuple[str, str]] = {}
+
+    # Iterate over columns and apply dtype reductions.
+    for col in out.columns:
+        if col in excl:
+            continue
+
+        s = out[col]
+        old_dtype = s.dtype
+
+        # 1) Boolean casting: recognize 0/1 (non-float) or existing bools.
+        if bool_cast:
+            if pd.api.types.is_bool_dtype(s):
+                pass  # already boolean
+            elif set(np.unique(s.dropna().values)).issubset(
+                {0, 1}
+            ) and not pd.api.types.is_float_dtype(s):
+                out[col] = s.astype("boolean") if s.isna().any() else s.astype(bool)
+                changes[col] = (old_dtype, out[col].dtype)
+                continue
+
+        # 2) Numeric downcasting.
+        if pd.api.types.is_float_dtype(s):
+            if downcast_float and s.dtype == "float64":
+                out[col] = pd.to_numeric(s, downcast="float")
+                changes[col] = (old_dtype, out[col].dtype)
+                continue
+
+        elif pd.api.types.is_integer_dtype(s):
+            if downcast_int and s.dtype == "int64":
+                out[col] = pd.to_numeric(s, downcast="integer")
+                changes[col] = (old_dtype, out[col].dtype)
+                continue
+
+        # 3) Nullable integers for integer-like object columns.
+        elif use_nullable_int and s.dtype == "object":
+            sample = s.sample(min(len(s), 5000), random_state=0)
+            try_parse = pd.to_numeric(sample, errors="coerce", downcast="integer")
+            if try_parse.notna().mean() > 0.98 and (try_parse % 1 == 0).all():
+                parsed = pd.to_numeric(s, errors="coerce", downcast="integer")
+                if parsed.isna().any():
+                    # Choose the smallest nullable integer dtype that can hold the range.
+                    iinfo = pd.Series(parsed.dropna().astype("int64"))
+                    minv, maxv = iinfo.min(), iinfo.max()
+                    if -128 <= minv and maxv <= 127:
+                        out[col] = parsed.astype("Int8")
+                    elif -32768 <= minv and maxv <= 32767:
+                        out[col] = parsed.astype("Int16")
+                    elif -2147483648 <= minv and maxv <= 2147483647:
+                        out[col] = parsed.astype("Int32")
+                    else:
+                        out[col] = parsed.astype("Int64")
+                else:
+                    out[col] = pd.to_numeric(parsed, downcast="integer")
+                changes[col] = (old_dtype, out[col].dtype)
+                continue
+
+        # 4) Text handling: low-cardinality -> category; otherwise -> string.
+        if s.dtype == "object":
+            nunq = s.nunique(dropna=True)
+            if nunq <= cat_threshold or nunq <= len(s) * cat_ratio:
+                out[col] = s.astype("category")
+            elif object_to_string:
+                out[col] = s.astype("string")
+            if out[col].dtype != old_dtype:
+                changes[col] = (old_dtype, out[col].dtype)
+
+    # Build memory report.
+    dst_mem = out.memory_usage(deep=True).sum()
+    delta = src_mem - dst_mem
+    ratio = (src_mem / max(dst_mem, 1)) if dst_mem else np.inf
+
+    mem_before = df.memory_usage(deep=True)
+    mem_after = out.memory_usage(deep=True)
+    diff = (mem_before - mem_after).sort_values(ascending=False)
+
+    report: dict[str, Any] = {
+        "mem_before_bytes": int(src_mem),
+        "mem_after_bytes": int(dst_mem),
+        "mem_saved_bytes": int(delta),
+        "mem_before_readable": fmt_bytes(src_mem),
+        "mem_after_readable": fmt_bytes(dst_mem),
+        "mem_saved_readable": fmt_bytes(delta),
+        "shrink_ratio": float(ratio),
+        "changed_cols": {k: (str(v0), str(v1)) for k, (v0, v1) in changes.items()},
+        "top_saving_cols": diff.head(report_topk).to_dict(),
+    }
+    return out, report

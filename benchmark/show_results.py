@@ -198,7 +198,9 @@ class ChainInterfaceDisplayer:
                 cluster_id_to_dockq_scores = defaultdict(list)
                 # DockQ only has interface metric
                 group_by_key = ["entry_id", "chain_id_1", "chain_id_2"]
-                for group_id, group_df in eval_df.groupby(by=group_by_key):
+                for group_id, group_df in eval_df.groupby(
+                    by=group_by_key, observed=True
+                ):
                     cluster_id = group_df["cluster_id"].iloc[0]
                     sample_dockq_row = agg_func(group_df)
                     sample_dockq_value = sample_dockq_row["dockq"]
@@ -330,7 +332,9 @@ class ChainInterfaceDisplayer:
                 else:
                     group_by_key = ["entry_id", "chain_id_1", "chain_id_2"]
 
-                for group_id, group_df in eval_df.groupby(by=group_by_key):
+                for group_id, group_df in eval_df.groupby(
+                    by=group_by_key, observed=True
+                ):
                     cluster_id = group_df["cluster_id"].iloc[0]
                     sample_lddt_row = agg_func(group_df)
                     sample_lddt_value = sample_lddt_row["lddt"]

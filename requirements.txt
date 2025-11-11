@@ -10,3 +10,4 @@ scipy
 tabulate
 tqdm
 click
+pyarrow

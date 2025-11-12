@@ -21,9 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from joblib import delayed, Parallel
-from pxmeter.configs.run_config import RUN_CONFIG
-from pxmeter.eval import evaluate
+from joblib import Parallel, delayed
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from tqdm import tqdm
@@ -34,6 +32,8 @@ from benchmark.utils import (
     int_to_letters,
     nested_dict_to_sorted_list,
 )
+from pxmeter.configs.run_config import RUN_CONFIG
+from pxmeter.eval import evaluate
 
 
 class BaseEvaluator:
@@ -90,9 +90,7 @@ class BaseEvaluator:
             seed,
             sample,
         ) = each_data[:4]
-        # Skip if pdb_id not in pdb_ids_list
-        if self.pdb_ids_list is not None and pdb_id not in self.pdb_ids_list:
-            return None
+
         # Skip if not overwrite and output already exists
         output_metric_json, output_confidence_json = self._get_output_path(
             name, seed, sample
@@ -123,13 +121,6 @@ class BaseEvaluator:
         Returns:
             list: A list of filtered data tuples.
         """
-
-        if self.chunk_str is not None:
-            # chunk_id start from "1"
-            chunk_id, chunk_num = self.chunk_str.split("of")
-            chunk_id = int(chunk_id)
-            chunk_num = int(chunk_num)
-            data = divide_list_into_chunks(data, chunk_num)[chunk_id - 1]
 
         results = [
             r
@@ -210,8 +201,27 @@ class BaseEvaluator:
                 - model_chain_id_to_lig_mol (dict[str, Chem.Mol], optional): A dictionary
                                       mapping ligand chain IDs to their corresponding molecules.
         """
+        # Skip if pdb_id not in pdb_ids_list
+        if self.pdb_ids_list is not None:
+            pdb_dir_list = [
+                self.pred_dir / pdb_id.strip() for pdb_id in self.pdb_ids_list
+            ]
+        else:
+            pdb_dir_list = list(self.pred_dir.iterdir())
 
-        pdb_dir_list = list(self.pred_dir.iterdir())
+        if self.chunk_str is not None:
+            # Shuffle data to prevent OutOfMemory from large structures.
+            random.seed(42)
+            random.shuffle(pdb_dir_list)
+
+            # chunk_id start from "1"
+            chunk_id, chunk_num = self.chunk_str.split("of")
+            chunk_id = int(chunk_id)
+            chunk_num = int(chunk_num)
+            pdb_dir_list = divide_list_into_chunks(pdb_dir_list, chunk_num)[
+                chunk_id - 1
+            ]
+
         results = [
             r
             for r in tqdm(

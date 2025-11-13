@@ -289,6 +289,10 @@ def agg_a_single_dir(pdb_dir: Path | str) -> tuple[pd.DataFrame, pd.DataFrame]:
 
             confidence_json = Path(str(sample_json).replace("_metrics", "_confidences"))
 
+            if not confidence_json.exists():
+                # Skip if confidence json is not found
+                continue
+
             json_to_df = ResultJsonToDataFrame(sample_json, confidence_json)
             metrics_df = json_to_df.get_summary_dataframe()
             metrics_df["seed"] = seed

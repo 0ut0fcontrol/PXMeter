@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
+
 import numpy as np
 
 from pxmeter.data.struct import Structure
@@ -616,6 +618,15 @@ class ChainPermutation:
                 self.ref_struct.uni_atom_id[ref_chain_indices],
                 self.model_struct.uni_atom_id[model_chain_indices],
             )
+
+            ref_align_ratio = len(ref_chain_aligned_indices) / len(ref_chain_indices)
+            if ref_align_ratio < 0.5:
+                logging.warning(
+                    "Only %.2f%% of atoms were aligned for ref chain %s to model chain %s",
+                    ref_align_ratio * 100,
+                    ref_chain_id,
+                    model_chain_id,
+                )
 
             ref_indices.extend(ref_chain_indices[ref_chain_aligned_indices])
             model_indices.extend(model_chain_indices[model_chain_aligned_indices])

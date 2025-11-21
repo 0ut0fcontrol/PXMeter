@@ -850,7 +850,9 @@ class MappingCIF:
         return indices_list
 
     def _reset_model_res_id_by_seq_alignment(
-        self, entity_alignments_dict: dict[tuple[str, str], Alignment]
+        self,
+        model_to_ref_poly_entity_id: dict[str, str],
+        entity_alignments_dict: dict[tuple[str, str], Alignment],
     ):
         """
         Reset the residue IDs in the model structure based on sequence alignments.
@@ -860,13 +862,18 @@ class MappingCIF:
         IDs in the model structure to match the reference structure.
 
         Args:
+            model_to_ref_poly_entity_id (dict[str, str]): A dictionary mapping model
+                                        entity IDs to reference entity IDs.
             entity_alignments_dict (dict[tuple[str, str]]): A dictionary containing
                                    the sequence alignments for entity pairs.
                                    The keys are tuples of reference and model entity IDs,
                                    and the values are Alignment objects representing
                                    the alignments between the corresponding entities.
         """
-        for (_ref_entity_id, model_entity_id), ali in entity_alignments_dict.items():
+        for (ref_entity_id, model_entity_id), ali in entity_alignments_dict.items():
+            if ref_entity_id != model_to_ref_poly_entity_id.get(model_entity_id, ""):
+                continue
+
             model_entity_mask = (
                 self.model_struct.atom_array.label_entity_id == model_entity_id
             )
@@ -893,7 +900,9 @@ class MappingCIF:
             ) = self.get_polymer_entity_mapping(self.ref_struct, self.model_struct)
 
             if not self.mapping_config["res_id_alignments"]:
-                self._reset_model_res_id_by_seq_alignment(poly_entity_alignments_dict)
+                self._reset_model_res_id_by_seq_alignment(
+                    model_to_ref_poly_entity_id, poly_entity_alignments_dict
+                )
         else:
             model_to_ref_poly_entity_id = {}
 

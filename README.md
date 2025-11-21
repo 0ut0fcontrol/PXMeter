@@ -54,6 +54,7 @@ pxm -r examples/7rss.cif -m examples/7rss_protenix_pred.cif -o pxm_output.json
 - `ref_altloc`: Specify the alternative location identifier for the reference CIF (default: "first", uses the first alternative location code for each residue).
 - `--chain_id_to_mol_json`: JSON file defining custom ligands, where keys are chain IDs (label_asym_id) and values are the corresponding ligand SMILES strings.
 - `-l` or `--interested_lig_label_asym_id`: Indicate the `label_asym_id` of ligands for metrics like pocket-aligned RMSD. Multiple ligands should be comma-separated.
+- `-C key.path=value`: Override fields in `pxmeter.configs.run_config.RUN_CONFIG` (repeatable; e.g., `-C metric.lddt.eps=1e-4 -C mapping.mapping_ligand=false`).
 
 To access the full list of parameters, use the `--help` option.
 
@@ -79,6 +80,27 @@ For detailed descriptions of additional parameters, use the `help()` function:
 ```python
 help(evaluate)
 ```
+
+If you need to modify the runtime settings defined in
+`pxmeter.configs.run_config.RUN_CONFIG` (equivalent to using `-C` on the command line),
+you may directly update the values in `RUN_CONFIG` and then pass it into the evaluate() function.
+```python
+from pxmeter.configs.run_config import RUN_CONFIG
+
+RUN_CONFIG.mapping.res_id_alignments = false
+...
+metric_result = evaluate(
+    ...,
+	run_config=RUN_CONFIG,
+)
+```
+
+### Common runtime settings
+These RUN_CONFIG options are often modified depending on the evaluation scenario:
+
+- `mapping.res_id_alignments` — Defaults to True. Matches residues between the reference and model chains directly by res_id,
+which generally requires the two sequences to be identical. Setting this to False switches the residue-matching strategy to sequence alignment.
+
 
 ## 📊 Benchmarking
 Refer to [benchmark/README.md](./benchmark/README.md) for evaluation protocols on:

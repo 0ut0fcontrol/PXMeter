@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 from pxmeter.cli import run_eval_cif
+from pxmeter.configs.run_config import apply_run_config_overrides
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
@@ -83,7 +84,24 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to output the mapped CIF file. Defaults to False.",
     )
+    parser.add_argument(
+        "-C",
+        "--config",
+        dest="config_overrides",
+        action="append",
+        default=[],
+        help=(
+            "Override run config. Use dotted keys from RUN_CONFIG, e.g. "
+            "-C metric.lddt.eps=1e-4 -C mapping.mapping_ligand=false. "
+            "This option can be repeated."
+        ),
+    )
     args = parser.parse_args()
+
+    # Apply -C overrides to RUN_CONFIG before evaluation
+    if args.config_overrides:
+        apply_run_config_overrides(args.config_overrides)
+
     time_start = time.time()
     run_eval_cif(
         ref_cif=args.ref_cif,
@@ -97,5 +115,5 @@ if __name__ == "__main__":
         output_mapped_cif=args.output_mapped_cif,
     )
     time_end = time.time()
-    logging.info("Save results to %s" % args.output_json)
-    logging.info("Evaluation time: %.2f seconds" % (time_end - time_start))
+    logging.info("Save results to %s", args.output_json)
+    logging.info("Evaluation time: %.2f seconds", (time_end - time_start))

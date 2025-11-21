@@ -18,6 +18,7 @@ from pathlib import Path
 import click
 from biotite import setup_ccd
 
+from pxmeter.configs.run_config import apply_run_config_overrides
 from pxmeter.eval import evaluate, MetricResult
 from pxmeter.utils import read_chain_id_to_mol_from_json
 
@@ -118,6 +119,16 @@ def run_eval_cif(
     is_flag=True,
     help="Whether to output the mapped CIF file. Defaults to False.",
 )
+@click.option(
+    "-C",
+    "--config",
+    "config_overrides",
+    multiple=True,
+    help=(
+        "Override run config. Use dotted keys from RUN_CONFIG, e.g. "
+        "-C metric.lddt.eps=1e-5 -C mapping.mapping_ligand=false"
+    ),
+)
 @click.pass_context
 def cli(
     ctx,
@@ -130,6 +141,7 @@ def cli(
     interested_lig_label_asym_id: str | None = None,
     chain_id_to_mol_json: Path | None = None,
     output_mapped_cif: bool = False,
+    config_overrides: tuple[str, ...] = (),
 ):
     """
     Evaluate the performance of a model CIF file by comparing it to a reference CIF file,
@@ -143,6 +155,9 @@ def cli(
         if ref_cif is None or model_cif is None:
             click.echo("Error: --ref_cif and --model_cif are required.")
             ctx.exit()
+
+        if config_overrides:
+            apply_run_config_overrides(config_overrides)
 
         run_eval_cif(
             ref_cif,

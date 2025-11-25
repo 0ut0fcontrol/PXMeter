@@ -534,6 +534,12 @@ def _get_a_dataset_result(
         )
         dna_prot_df["eval_type"] = "dsDNA-Protein"
         dna_prot_details_df["eval_type"] = "dsDNA-Protein"
+
+        # Replace the chain_id_1 and chain_id_2 with pd.NA
+        # since they are a average of two interfaces
+        dna_prot_details_df["chain_id_1"] = pd.NA
+        dna_prot_details_df["chain_id_2"] = pd.NA
+
         result_df_list.append(dna_prot_df)
         details_df_list.append(dna_prot_details_df)
 

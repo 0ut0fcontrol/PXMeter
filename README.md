@@ -87,8 +87,7 @@ you may directly update the values in `RUN_CONFIG` and then pass it into the eva
 ```python
 from pxmeter.configs.run_config import RUN_CONFIG
 
-RUN_CONFIG.mapping.res_id_alignments = false
-...
+RUN_CONFIG.mapping.res_id_alignments = False
 metric_result = evaluate(
     ...,
 	run_config=RUN_CONFIG,

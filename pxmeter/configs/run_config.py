@@ -32,6 +32,7 @@ RUN_CONFIG = ConfigDict(
                 "eps": 1e-6,
                 "nucleotide_threshold": 30.0,
                 "non_nucleotide_threshold": 15.0,
+                "stereochecks": False,
             },
             "clashes": {
                 "vdw_scale_factor": 0.5,

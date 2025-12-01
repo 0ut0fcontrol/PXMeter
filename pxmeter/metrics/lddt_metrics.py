@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Sequence
+
 import numpy as np
 from scipy.spatial import KDTree
 
 from pxmeter.constants import DNA, RNA
 from pxmeter.data.struct import Structure
+from pxmeter.metrics.stereochemistry.check import StereoChemValidator
 
 
 class LDDT:
@@ -40,6 +43,8 @@ class LDDT:
         is_nucleotide_threshold=30.0,
         is_not_nucleotide_threshold=15.0,
         eps: float = 1e-10,
+        stereochecks: bool = False,
+        lddt_thresholds: Sequence[float] = (0.5, 1.0, 2.0, 4.0),
     ):
         self.ref_struct = ref_struct
         self.model_struct = model_struct
@@ -47,8 +52,20 @@ class LDDT:
         self.is_nucleotide_threshold = is_nucleotide_threshold
         self.is_not_nucleotide_threshold = is_not_nucleotide_threshold
         self.eps = eps
+        self.lddt_thresholds = lddt_thresholds
+
+        self.model_atom_mask = (
+            self._get_model_stereo_valid_atom_mask() if stereochecks else None
+        )
 
         self.lddt_atom_pair = self.compute_lddt_atom_pair()
+
+    def _get_model_stereo_valid_atom_mask(self) -> np.ndarray:
+        checker = StereoChemValidator(
+            struct=self.model_struct, ref_struct=self.ref_struct
+        )
+        model_atom_mask = checker.get_valid_atom_mask()
+        return model_atom_mask
 
     @staticmethod
     def _get_pair_from_kdtree(
@@ -108,7 +125,10 @@ class LDDT:
         return atom_pairs
 
     def _calc_lddt(
-        self, model_dist_sparse_lm: np.ndarray, ref_dist_sparse_lm: np.ndarray
+        self,
+        model_dist_sparse_lm: np.ndarray,
+        ref_dist_sparse_lm: np.ndarray,
+        pair_valid_mask: np.ndarray | None = None,
     ) -> float:
         """
         Calculate LDDT scores from predicted and true atom pair distances.
@@ -116,6 +136,8 @@ class LDDT:
         Args:
             model_dist_sparse_lm: [N_pair_sparse] Distances between atom pairs in model structure.
             ref_dist_sparse_lm: [N_pair_sparse] Distances between atom pairs in reference structure.
+            pair_valid_mask: [N_pair_sparse] Optional boolean mask. Pairs with False will get
+                LDDT score 0 but still be counted in the mean.
 
         Returns:
             float: LDDT scores ranging 0-1
@@ -124,10 +146,17 @@ class LDDT:
             model_dist_sparse_lm - ref_dist_sparse_lm
         )  # [N_pair_sparse]
 
-        thresholds = [0.5, 1.0, 2.0, 4.0]
-        sparse_pair_lddt = np.mean(
-            np.stack([distance_error_l1 < t for t in thresholds], axis=-1), axis=-1
-        )  # [N_pair_sparse]
+        per_thr_scores = np.stack(
+            [distance_error_l1 < t for t in self.lddt_thresholds], axis=-1
+        ).astype(
+            float
+        )  # [N_pair_sparse, 4]
+
+        if pair_valid_mask is not None:
+            # Zero out all threshold scores for invalid pairs
+            per_thr_scores = per_thr_scores * pair_valid_mask[:, None]
+
+        sparse_pair_lddt = np.mean(per_thr_scores, axis=-1)
 
         # Compute mean
         lddt = np.mean(sparse_pair_lddt)
@@ -226,7 +255,19 @@ class LDDT:
             model_dist_sparse_lm, ref_dist_sparse_lm = self._calc_sparse_dist(
                 l_index, m_index
             )
-            lddt_value = self._calc_lddt(model_dist_sparse_lm, ref_dist_sparse_lm)
+
+            pair_valid_mask = None
+            if self.model_atom_mask is not None:
+                # A pair is valid only if both atoms are unmasked
+                pair_valid_mask = (
+                    self.model_atom_mask[l_index] & self.model_atom_mask[m_index]
+                )
+
+            lddt_value = self._calc_lddt(
+                model_dist_sparse_lm,
+                ref_dist_sparse_lm,
+                pair_valid_mask=pair_valid_mask,
+            )
         else:
             n_eval = chain_1_masks.shape[0]
             lddt_value = []  # [N_eval]
@@ -240,9 +281,18 @@ class LDDT:
                 model_dist_sparse_lm, ref_dist_sparse_lm = self._calc_sparse_dist(
                     l_index, m_index
                 )
+
+                pair_valid_mask = None
+                if self.model_atom_mask is not None:
+                    # Mask applies per pair
+                    pair_valid_mask = (
+                        self.model_atom_mask[l_index] & self.model_atom_mask[m_index]
+                    )
+
                 lddt_value_i = self._calc_lddt(
                     model_dist_sparse_lm,
                     ref_dist_sparse_lm,
+                    pair_valid_mask=pair_valid_mask,
                 )
                 lddt_value.append(lddt_value_i)
         return lddt_value

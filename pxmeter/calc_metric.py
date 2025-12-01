@@ -232,6 +232,7 @@ class CalcLDDTMetric:
             is_nucleotide_threshold=lddt_config.nucleotide_threshold,
             is_not_nucleotide_threshold=lddt_config.non_nucleotide_threshold,
             eps=lddt_config.eps,
+            stereochecks=lddt_config.stereochecks,
         )
 
     def get_chains_mask(

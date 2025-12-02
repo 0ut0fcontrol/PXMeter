@@ -249,7 +249,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-it",
         "--input-type",
-        "input_type",
+        dest="input_type",
         type=str,
         required=True,
         help="Input type, choices: " + ", ".join(VALID_INPUT_TYPES),
@@ -258,7 +258,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-ot",
         "--output-type",
-        "output_type",
+        dest="output_type",
         type=str,
         required=True,
         help="Output type, choices: " + ", ".join(VALID_OUTPUT_TYPES),
@@ -281,7 +281,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-a",
         "--assembly-id",
-        "assembly_id",
+        dest="assembly_id",
         type=str,
         default=None,
         help="Assembly ID in the input CIF file. Defaults to None. Ignored for non-CIF input types.",

@@ -36,3 +36,37 @@ def read_chain_id_to_mol_from_json(json_f: Path | str) -> dict[str, Chem.Mol]:
     for k, v in chain_id_to_mol_rep.items():
         chain_id_to_mol[k] = Chem.MolFromSmiles(v)
     return chain_id_to_mol
+
+
+def int_to_letters(n: int) -> str:
+    """
+    Convert int to letters.
+    Useful for converting chain index to label_asym_id.
+
+    Args:
+        n (int): int number
+    Returns:
+        str: letters. e.g. 1 -> A, 2 -> B, 27 -> AA, 28 -> AB
+    """
+    result = ""
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+
+def letters_to_int(s: str) -> int:
+    """
+    Convert letters back to int.
+    Inverse of int_to_letters().
+
+    Args:
+        s (str): letter sequence, e.g. "A", "B", "AA", "AB"
+    Returns:
+        int: corresponding integer, e.g. A -> 1, B -> 2, AA -> 27
+    """
+    s = s.upper()
+    result = 0
+    for ch in s:
+        result = result * 26 + (ord(ch) - 64)  # 'A'→1, 'B'→2 ...
+    return result

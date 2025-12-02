@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import sys
 from pathlib import Path
 
@@ -20,7 +21,17 @@ from biotite import setup_ccd
 
 from pxmeter.configs.run_config import apply_run_config_overrides
 from pxmeter.eval import evaluate, MetricResult
+from pxmeter.input_builder.gen_input import (
+    run_gen_input,
+    VALID_INPUT_TYPES,
+    VALID_OUTPUT_TYPES,
+)
 from pxmeter.utils import read_chain_id_to_mol_from_json
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 
 def run_eval_cif(
@@ -186,3 +197,93 @@ def update():
     Update the CCD database.
     """
     setup_ccd.main()
+
+
+@cli.command(name="gen-input")
+@click.option(
+    "-i",
+    "--input",
+    "input_path",
+    type=click.Path(path_type=Path, exists=True),
+    required=True,
+    help="Input file or directory.",
+)
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Output file or directory.",
+)
+@click.option(
+    "-it",
+    "--input-type",
+    type=click.Choice(VALID_INPUT_TYPES, case_sensitive=False),
+    required=True,
+    help="Input type, choices: " + ", ".join(VALID_INPUT_TYPES),
+)
+@click.option(
+    "-ot",
+    "--output-type",
+    type=click.Choice(VALID_OUTPUT_TYPES, case_sensitive=False),
+    required=True,
+    help="Output type, choices: " + ", ".join(VALID_OUTPUT_TYPES),
+)
+@click.option(
+    "-s",
+    "--seeds",
+    type=str,
+    default=None,
+    help=r'Comma-separated seeds, e.g. "0,1,2"; required if --num-seeds is not provided (excluding "-ot boltz").',
+)
+@click.option(
+    "-ns",
+    "--num-seeds",
+    type=int,
+    default=None,
+    help=r'Number of seeds; required if --seeds is not provided (excluding "-ot boltz").',
+)
+@click.option(
+    "-a",
+    "--assembly-id",
+    "assembly_id",
+    type=str,
+    default=None,
+    help="Assembly ID in the input CIF file. Defaults to None. Ignored for non-CIF input types.",
+)
+@click.option(
+    "-n",
+    "--num-cpu",
+    type=int,
+    default=-1,
+    help="Number of CPUs to use. Defaults to -1 (all available).",
+)
+def gen_input_cli(
+    input_path: Path,
+    output_path: Path,
+    input_type: str,
+    output_type: str,
+    seeds: list[int] = None,
+    num_seeds: int = None,
+    assembly_id: str | None = None,
+    num_cpu: int = -1,
+):
+    """
+    Generate model inputs.
+    """
+    if seeds is not None:
+        seeds_lst = [int(x.strip()) for x in seeds.split(",") if x.strip()]
+    else:
+        seeds_lst = seeds
+
+    run_gen_input(
+        input_path,
+        output_path,
+        input_type,
+        output_type,
+        seeds=seeds_lst,
+        num_seeds=num_seeds,
+        assembly_id=assembly_id,
+        num_cpu=num_cpu,
+    )

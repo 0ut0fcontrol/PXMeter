@@ -11,3 +11,4 @@ tabulate
 tqdm
 click
 pyarrow
+PyYAML

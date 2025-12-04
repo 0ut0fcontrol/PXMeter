@@ -235,18 +235,19 @@ class MappingCIF:
         )
 
         # Identical chains should be included within the same entity.
-        new_label_entity_id = self._rearrange_entities_for_model(
-            model_struct.atom_array
-        )
+        if self.mapping_config.auto_fix_model_entities:
+            new_label_entity_id = self._rearrange_entities_for_model(
+                model_struct.atom_array
+            )
 
-        unique_array, indices = np.unique(new_label_entity_id, return_index=True)
-        model_entity_id_old_and_new = [
-            (model_struct.atom_array.label_entity_id[index], key)
-            for key, index in zip(unique_array, indices)
-        ]
+            unique_array, indices = np.unique(new_label_entity_id, return_index=True)
+            model_entity_id_old_and_new = [
+                (model_struct.atom_array.label_entity_id[index], key)
+                for key, index in zip(unique_array, indices)
+            ]
 
-        model_struct.reset_atom_array_annot("label_entity_id", new_label_entity_id)
-        model_struct.update_entity_poly(model_entity_id_old_and_new)
+            model_struct.reset_atom_array_annot("label_entity_id", new_label_entity_id)
+            model_struct.update_entity_poly(model_entity_id_old_and_new)
 
         # Elements should be in uppercase; some model outputs use lowercase in CIF files
         upper_element = np.char.upper(model_struct.atom_array.element)

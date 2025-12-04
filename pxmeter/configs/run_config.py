@@ -21,6 +21,7 @@ RUN_CONFIG = ConfigDict(
             "mapping_ligand": True,
             "res_id_alignments": True,
             "enumerate_all_anchors": True,
+            "auto_fix_model_entities": True,
         },
         "metric": {
             "calc_clashes": True,

@@ -15,6 +15,7 @@
 import logging
 
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 from pxmeter.data.struct import Structure
 from pxmeter.metrics.rmsd import align_src_to_tar, apply_transform, rmsd
@@ -338,7 +339,7 @@ class ChainPermutation:
                 ] = np.linalg.norm(center1 - center2)
 
         matched_chains = {}
-        row_indices, col_indices = ChainPermutation._find_min_indices(dist_mat)
+        row_indices, col_indices = linear_sum_assignment(dist_mat)
         for row, col in zip(row_indices, col_indices):
             if np.isinf(dist_mat[row, col]):
                 # "inf" distance if the pair is banned
@@ -349,7 +350,7 @@ class ChainPermutation:
             matched_chains if not swapped else {v: k for k, v in matched_chains.items()}
         )
 
-    def greedy_match_for_chains(
+    def match_for_chains(
         self,
         model_anchor_chain_id: str,
         ref_anchor_chain_id: str,
@@ -559,7 +560,7 @@ class ChainPermutation:
             )
 
             # Greedily matches all remaining chains
-            ref_to_model_matched_chains = self.greedy_match_for_chains(
+            ref_to_model_matched_chains = self.match_for_chains(
                 model_anchor_chain_id, ref_anchor_chain_id, aligned_ref_coord
             )
 

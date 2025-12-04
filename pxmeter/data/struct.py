@@ -54,6 +54,9 @@ class Structure:
     exptl_methods: tuple[str] = tuple()
     cif_block: dict = None
 
+    def __repr__(self):
+        return f"Structure(atom_array={self.atom_array[:30]})"
+
     @classmethod
     def from_mmcif(
         cls,

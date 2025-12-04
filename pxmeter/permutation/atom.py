@@ -59,7 +59,7 @@ class AtomPermutation:
             perm_dict = get_ccd_perm_info(ccd_code=atom_array.res_name[start])
 
             if not perm_dict:
-                atom_perm_list.extend([[i] for i in curr_res_atom_idx])
+                atom_perm_list.append(np.array([[i] for i in curr_res_atom_idx]))
                 continue
 
             perm_array = perm_dict["perm_array"]  # [N_atoms, N_perm]

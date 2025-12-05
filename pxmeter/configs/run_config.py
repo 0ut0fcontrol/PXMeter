@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+
+from biotite.structure.info import set_ccd_path
 from ml_collections.config_dict import ConfigDict
 
 RUN_CONFIG = ConfigDict(
@@ -41,6 +44,12 @@ RUN_CONFIG = ConfigDict(
         },
     }
 )
+
+
+# Set the path to the CCD file from the environment variable.
+pxm_ccd_file = os.environ.get("PXM_CCD_FILE")
+if pxm_ccd_file:
+    set_ccd_path(pxm_ccd_file)
 
 
 def set_cfg(path: list[str], value):

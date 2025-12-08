@@ -44,7 +44,7 @@ class StereoChemValidator:
             clash detection. If provided, its atoms must be in strict
             one-to-one order correspondence with those in the query
             structure (same length and indexing), and its bond graph will
-            be used to detect clashes.
+            be added to the query bond graph to detect clashes.
         atom_array (AtomArray): Parsed atom array containing coordinates
             and residue annotations.
         entity_poly_type (dict[str, str]): Mapping from entity ID to polymer
@@ -1260,12 +1260,11 @@ class StereoChemValidator:
                     f"does not match number of atoms {n_atoms}"
                 )
 
-        if self.ref_struct is None:
-            bonds = atom_array.bonds
-        else:
-            # Use bonds from reference structure if available
+        bonds = atom_array.bonds
+        if self.ref_struct is not None:
+            # Add bonds from reference structure if available
             assert len(self.ref_struct.atom_array) == n_atoms
-            bonds = self.ref_struct.atom_array.bonds
+            bonds += self.ref_struct.atom_array.bonds
 
         if not np.any(query_mask):
             # no query atoms

@@ -59,13 +59,18 @@ class AtomPermutation:
             perm_dict = get_ccd_perm_info(ccd_code=atom_array.res_name[start])
 
             if not perm_dict:
-                atom_perm_list.append(np.array([[i] for i in curr_res_atom_idx]))
+                atom_perm_list.append(np.arange(stop - start)[:, None])
+                continue
+
+            atom_names = list(atom_array.atom_name[start:stop])
+            atom_map = perm_dict["atom_map"]
+
+            if not set(atom_names).issubset(atom_map.keys()):
+                atom_perm_list.append(np.arange(stop - start)[:, None])
                 continue
 
             perm_array = perm_dict["perm_array"]  # [N_atoms, N_perm]
-            perm_atom_idx_in_res_order = [
-                perm_dict["atom_map"][i] for i in atom_array.atom_name[start:stop]
-            ]
+            perm_atom_idx_in_res_order = [atom_map[name] for name in atom_names]
             perm_idx_to_present_atom_idx = dict(
                 zip(perm_atom_idx_in_res_order, curr_res_atom_idx)
             )

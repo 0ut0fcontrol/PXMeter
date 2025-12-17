@@ -20,7 +20,7 @@ from typing import Sequence
 import numpy as np
 from biotite.structure import AtomArray, CellList
 
-from pxmeter.constants import CRYSTALLIZATION_AIDS, CRYSTALLIZATION_METHODS
+from pxmeter.constants import CRYSTALLIZATION_AIDS, CRYSTALLIZATION_METHODS, POLYMER
 from pxmeter.data.parser import MMCIFParser
 from pxmeter.data.utils import get_unique_atom_id, get_unique_chain_id
 from pxmeter.data.writer import CIFWriter
@@ -202,17 +202,28 @@ class Structure:
         aids_mask = np.isin(self.atom_array.res_name, CRYSTALLIZATION_AIDS)
         return aids_mask
 
-    def get_polymer_mask(self) -> np.ndarray:
+    def get_mask_for_given_entity_types(
+        self, entity_types: list[str] | str
+    ) -> np.ndarray:
         """
-        Get a mask of polymer residues.
+        Get a mask of atoms given entity types.
+
+        Args:
+            entity_types (list[str] | str): Entity types.
 
         Returns:
-            np.ndarray: Mask of polymer atoms.
+            np.ndarray: Mask of atoms.
         """
-        polyer_mask = np.isin(
-            self.atom_array.label_entity_id, list(self.entity_poly_seq.keys())
-        )
-        return polyer_mask
+        if isinstance(entity_types, str):
+            entity_types = [entity_types]
+
+        entity_ids = []
+        for k, v in self.entity_poly_type.items():
+            if v in entity_types:
+                entity_ids.append(k)
+
+        mask = np.isin(self.atom_array.label_entity_id, entity_ids)
+        return mask
 
     def get_residue_starts(self, add_exclusive_stop: bool = False) -> np.ndarray:
         """
@@ -548,7 +559,9 @@ class Structure:
             set(self.exptl_methods) & CRYSTALLIZATION_METHODS
         ):
             # only remove aids in non-polymer residues
-            non_polymer_mask = ~self.get_polymer_mask()
+            non_polymer_mask = ~self.get_mask_for_given_entity_types(
+                entity_types=POLYMER
+            )
             crys_aids_mask = self._get_crystallization_aids_mask()
             mask &= ~(non_polymer_mask & crys_aids_mask)
 

@@ -441,7 +441,7 @@ class Sequences:
         ori_chain_id_to_index = {seq.ori_chain_id: i for i, seq in enumerate(seqs_lst)}
 
         bond_array = structure.atom_array.bonds.as_array()
-        is_polymer = structure.get_polymer_mask()
+        is_polymer = structure.get_mask_for_given_entity_types(entity_types=POLYMER)
         chain_id = structure.uni_chain_id
         res_id = structure.atom_array.res_id
         atoms1 = bond_array[:, 0]

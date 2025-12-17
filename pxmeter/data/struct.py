@@ -20,7 +20,18 @@ from typing import Sequence
 import numpy as np
 from biotite.structure import AtomArray, CellList
 
-from pxmeter.constants import CRYSTALLIZATION_AIDS, CRYSTALLIZATION_METHODS, POLYMER
+from pxmeter.constants import (
+    CRYSTALLIZATION_AIDS,
+    CRYSTALLIZATION_METHODS,
+    DNA,
+    NUC_BACKBONE,
+    NUC_BACKBONE_REP_ATOM,
+    POLYMER,
+    PROTEIN,
+    PROTEIN_BACKBONE,
+    PROTEIN_BACKBONE_REP_ATOM,
+    RNA,
+)
 from pxmeter.data.parser import MMCIFParser
 from pxmeter.data.utils import get_unique_atom_id, get_unique_chain_id
 from pxmeter.data.writer import CIFWriter
@@ -516,6 +527,37 @@ class Structure:
             # np.array([[atom1, atom2, bond_order], ...])
             lig_polymer_bonds = bond_array[lig_polymer_bond_indices]
         return lig_polymer_bonds
+
+    def get_backbone_atom_masks(self, only_rep_atom: bool = True) -> np.ndarray:
+        """
+        Get masks for protein and nucleic acid backbone atoms.
+
+        Args:
+            only_rep_atom (bool, optional): Whether to only include
+                one representative atom per residue. Defaults to True.
+
+        Returns:
+            np.ndarray: Bool masks for protein and nucleic acid backbone atoms.
+        """
+        protein_mask = self.get_mask_for_given_entity_types(entity_types=PROTEIN)
+        nuc_mask = self.get_mask_for_given_entity_types(entity_types=[RNA, DNA])
+
+        if only_rep_atom:
+            protein_backbone_mask = protein_mask & (
+                self.atom_array.atom_name == PROTEIN_BACKBONE_REP_ATOM
+            )
+            nuc_backbone_mask = nuc_mask & (
+                self.atom_array.atom_name == NUC_BACKBONE_REP_ATOM
+            )
+        else:
+            protein_backbone_mask = protein_mask & np.isin(
+                self.atom_array.atom_name, PROTEIN_BACKBONE
+            )
+            nuc_backbone_mask = nuc_mask & np.isin(
+                self.atom_array.atom_name, NUC_BACKBONE
+            )
+        backbone_mask = protein_backbone_mask | nuc_backbone_mask
+        return backbone_mask
 
     def clean_structure(
         self,

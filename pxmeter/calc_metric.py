@@ -190,13 +190,16 @@ class CalcLDDTMetric:
         merged_chain_2_masks = np.array(merged_chain_2_masks)
         return merged_chain_1_masks, merged_chain_2_masks
 
-    def get_complex_lddt(self) -> float:
+    def get_complex_lddt(self, atom_mask: np.ndarray | None = None) -> float:
         """
         Calculate the LDDT score for a complex.
 
         This method uses the LDDT calculator to compute the LDDT score based on the predicted
         and true coordinates of the complex. The LDDT score is a measure of the
         structural similarity between the predicted and true structures.
+
+        Args:
+            atom_mask (np.ndarray): A mask for the atoms to include in the calculation.
 
         Returns:
             float: The LDDT score for the complex.
@@ -205,11 +208,15 @@ class CalcLDDTMetric:
         complex_lddt = self.lddt_calculator.run(
             chain_1_masks=None,
             chain_2_masks=None,
+            atom_mask=atom_mask,
         )
         return complex_lddt
 
     def get_chain_interface_lddt(
-        self, chains: list[str], interfaces: list[tuple[str, str]]
+        self,
+        chains: list[str],
+        interfaces: list[tuple[str, str]],
+        atom_mask: np.ndarray | None = None,
     ) -> list[float]:
         """
         Calculate the LDDT scores for chains and interfaces.
@@ -217,7 +224,9 @@ class CalcLDDTMetric:
         Args:
             chains (list[str]): A list of chain identifiers.
             interfaces (list[tuple[str, str]]): A list of tuples, each containing
-                                                two chain identifiers representing an interface.
+                two chain identifiers representing an interface.
+            atom_mask (np.ndarray, optional): A mask for the atoms to include in the calculation.
+                Defaults to None.
 
         Returns:
             list[float]: A list of LDDT scores for chains and interfaces.
@@ -229,6 +238,7 @@ class CalcLDDTMetric:
         lddt_list = self.lddt_calculator.run(
             chain_1_masks=merged_chain_1_masks,
             chain_2_masks=merged_chain_2_masks,
+            atom_mask=atom_mask,
         )
         return lddt_list
 
@@ -334,20 +344,25 @@ class MetricResult:
         chains: list[str],
         interfaces: list[tuple[str, str]],
         chain_interface_lddt: list[float],
+        metric_name: str = "lddt",
     ) -> tuple[dict[str, dict[str, float]], dict[tuple[str, str], dict[str, float]]]:
         chain_lddt_dict = {}
         interface_lddt_dict = {}
         num_chains = len(chains)
         for idx, chain_id in enumerate(chains):
-            chain_lddt_dict[chain_id] = {"lddt": chain_interface_lddt[idx]}
+            lddt_value = chain_interface_lddt[idx]
+            if np.isnan(lddt_value):
+                continue
+            chain_lddt_dict[chain_id] = {metric_name: lddt_value}
 
         for idx, interface in enumerate(interfaces):
             sorted_interface = tuple(
                 sorted(interface)
             )  # Sort chains to ensure consistent order
-            interface_lddt_dict[sorted_interface] = {
-                "lddt": chain_interface_lddt[idx + num_chains]
-            }
+            lddt_value = chain_interface_lddt[idx + num_chains]
+            if np.isnan(lddt_value):
+                continue
+            interface_lddt_dict[sorted_interface] = {metric_name: lddt_value}
         return chain_lddt_dict, interface_lddt_dict
 
     @staticmethod
@@ -508,7 +523,8 @@ class MetricResult:
                 lddt_config=metric_config.lddt,
             )
             complex_lddt = calc_lddt.get_complex_lddt()
-            complex_result_dict["lddt"] = complex_lddt
+            if not np.isnan(complex_lddt):
+                complex_result_dict["lddt"] = complex_lddt
 
             chain_interface_lddt = calc_lddt.get_chain_interface_lddt(
                 chains, interfaces
@@ -521,6 +537,27 @@ class MetricResult:
             )
             cls._update_src_to_tar_dict(chain_lddt_dict, chain_result_dict)
             cls._update_src_to_tar_dict(interface_lddt_dict, interface_result_dict)
+
+            if metric_config.lddt.calc_backbone_lddt:
+                backbone_mask = ref_struct.get_backbone_atom_masks(only_rep_atom=True)
+                complex_bb_lddt = calc_lddt.get_complex_lddt(atom_mask=backbone_mask)
+                if not np.isnan(complex_bb_lddt):
+                    complex_result_dict["bb_lddt"] = complex_bb_lddt
+
+                # It reuses the chains and interfaces from the previous step
+                chain_interface_lddt = calc_lddt.get_chain_interface_lddt(
+                    chains, interfaces, atom_mask=backbone_mask
+                )
+                (
+                    chain_bb_lddt_dict,
+                    interface_bb_lddt_dict,
+                ) = cls._post_process_chain_interface_lddt(
+                    chains, interfaces, chain_interface_lddt, metric_name="bb_lddt"
+                )
+                cls._update_src_to_tar_dict(chain_bb_lddt_dict, chain_result_dict)
+                cls._update_src_to_tar_dict(
+                    interface_bb_lddt_dict, interface_result_dict
+                )
 
         # Calculate DockQ
         if metric_config.calc_dockq:

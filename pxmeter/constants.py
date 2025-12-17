@@ -51,6 +51,9 @@ NUC_BACKBONE = (
     "C3'", "C2'", "C1'", "O4'", "O3'", "O2'",
 )  # fmt:skip
 
+PROTEIN_BACKBONE_REP_ATOM = "CA"
+NUC_BACKBONE_REP_ATOM = "C3'"
+
 # In the CCD CIF file, there is only one atom with a CCD Code.
 IONS = {'0BE', '3CO', '3NI', '4MO', '4PU', '4TI', '6MO', 'AG', 'AL', 'AM',
         'AR', 'ARS', 'AU', 'AU3', 'BA', 'BR', 'BRO', 'BS3', 'CA', 'CD',

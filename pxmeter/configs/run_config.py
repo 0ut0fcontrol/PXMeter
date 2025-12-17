@@ -37,6 +37,7 @@ RUN_CONFIG = ConfigDict(
                 "nucleotide_threshold": 30.0,
                 "non_nucleotide_threshold": 15.0,
                 "stereochecks": False,
+                "calc_backbone_lddt": True,
             },
             "dockq": {
                 "exclude_hetatms": True,

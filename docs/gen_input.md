@@ -42,6 +42,7 @@ The tool works on **single files** or **directories** (flat directory only).
 | `-o, --output`       | Output file or directory |
 | `-it, --input-type`  | Input format             |
 | `-ot, --output-type` | Output format            |
+| `-p, --pdb-ids`      | Filter inputs by PDB IDs (comma-separated or file path) |
 
 **Input and output formats must differ.**
 **File-to-file or dir-to-dir only.**
@@ -166,6 +167,39 @@ pxm gen-input \
   -i ./cifs \
   -o ./af3_inputs \
   -it cif -ot af3 \
+  --num-seeds 5 \
+  --assembly-id 1 \
+  --num-cpu 8
+```
+
+### AF3 → Protenix
+
+```bash
+pxm gen-input \
+  -i af3.json \
+  -o protenix.json \
+  -it af3 -ot protenix \
+  --seeds "0"
+```
+
+### Protenix → Boltz
+
+```bash
+pxm gen-input \
+  -i protenix.json \
+  -o boltz.yaml \
+  -it protenix -ot boltz
+```
+
+### mmCIF → Boltz
+
+```bash
+pxm gen-input \
+  -i structure.cif \
+  -o boltz.yaml \
+  -it cif -ot boltz
+```
+t af3 \
   --num-seeds 5 \
   --assembly-id 1 \
   --num-cpu 8

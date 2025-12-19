@@ -146,6 +146,7 @@ def run_gen_input(
     num_seeds: int = None,
     assembly_id: str | None = None,
     num_cpu: int = -1,
+    pdb_ids: str | None = None,
 ):
     """
     Entry point for generating model inputs from files or directories.
@@ -165,7 +166,22 @@ def run_gen_input(
         assembly_id (str | None, optional): Assembly ID for CIF input. Defaults to None.
         num_cpu (int, optional): Number of CPUs for parallel batch generation.
             Defaults to -1 (all available cores).
+        pdb_ids (str | None, optional): Optional list of PDB IDs.
+            It supports either a comma-separated string (e.g.``"7n0a,7rss"``)
+            or a path to a text file containing one PDB ID per line.
+            After parsing, the PDB IDs are passed here as a list of
+            strings and are used to restrict which input/output files are
+            generated when ``input_path`` is a directory.
     """
+    pdb_ids_lst = []
+    if pdb_ids:
+        pdb_ids_path = Path(pdb_ids)
+        if pdb_ids_path.is_file():
+            with pdb_ids_path.open("r", encoding="utf-8") as f:
+                pdb_ids_lst = [line.strip() for line in f if line.strip()]
+        else:
+            pdb_ids_lst = [x.strip() for x in pdb_ids.split(",") if x.strip()]
+
     input_type = input_type.strip().lower()
     output_type = output_type.strip().lower()
 
@@ -190,8 +206,6 @@ def run_gen_input(
             seeds = list(range(num_seeds))
 
     if input_is_dir:
-        input_and_output_files = []
-
         # Select file suffixes
         if input_type == "cif":
             input_suffixes = ".cif"
@@ -210,15 +224,27 @@ def run_gen_input(
         else:
             raise ValueError(f"Unsupported output type: {output_type}")
 
-        for input_f in input_path.iterdir():
-            if input_f.is_file() and (input_f.suffix == input_suffixes):
-                input_and_output_files.append(
-                    (
-                        input_f,
-                        output_path
-                        / str(input_f.name).replace(input_suffixes, output_suffixes),
-                    )
+        if pdb_ids_lst:
+            input_and_output_files = [
+                (
+                    input_path / f"{pdb_id}{input_suffixes}",
+                    output_path / f"{pdb_id}{output_suffixes}",
                 )
+                for pdb_id in pdb_ids_lst
+            ]
+        else:
+            input_and_output_files = []
+            for input_f in input_path.iterdir():
+                if input_f.is_file() and (input_f.suffix == input_suffixes):
+                    input_and_output_files.append(
+                        (
+                            input_f,
+                            output_path
+                            / str(input_f.name).replace(
+                                input_suffixes, output_suffixes
+                            ),
+                        )
+                    )
 
         if len(input_and_output_files) == 0:
             raise RuntimeError(
@@ -287,6 +313,19 @@ if __name__ == "__main__":
         help="Assembly ID in the input CIF file. Defaults to None. Ignored for non-CIF input types.",
     )
     parser.add_argument("-n", "--num-cpu", type=int, default=-1, help="Number of CPUs")
+    parser.add_argument(
+        "-p",
+        "--pdb-ids",
+        dest="pdb_ids",
+        type=str,
+        default=None,
+        help=(
+            "PDB IDs as a comma-separated string (e.g. '7n0a,7rss') "
+            "or a path to a text file containing one PDB ID per line."
+            "This option is only applicable when the input is a directory."
+            "If not provided, all files in the input directory will be processed."
+        ),
+    )
     args = parser.parse_args()
 
     if args.seeds is not None:
@@ -303,4 +342,5 @@ if __name__ == "__main__":
         num_seeds=args.num_seeds,
         assembly_id=args.assembly_id,
         num_cpu=args.num_cpu,
+        pdb_ids=args.pdb_ids,
     )

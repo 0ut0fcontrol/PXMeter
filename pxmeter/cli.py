@@ -231,6 +231,19 @@ def update():
     help="Output type, choices: " + ", ".join(VALID_OUTPUT_TYPES),
 )
 @click.option(
+    "-p",
+    "--pdb-ids",
+    "pdb_ids",
+    type=str,
+    default=None,
+    help=(
+        "PDB IDs as a comma-separated string (e.g. '7n0a,7rss') "
+        "or a path to a text file containing one PDB ID per line."
+        "This option is only applicable when the input is a directory."
+        "If not provided, all files in the input directory will be processed."
+    ),
+)
+@click.option(
     "-s",
     "--seeds",
     type=str,
@@ -267,6 +280,7 @@ def gen_input_cli(
     seeds: list[int] = None,
     num_seeds: int = None,
     assembly_id: str | None = None,
+    pdb_ids: str | None = None,
     num_cpu: int = -1,
 ):
     """
@@ -285,5 +299,6 @@ def gen_input_cli(
         seeds=seeds_lst,
         num_seeds=num_seeds,
         assembly_id=assembly_id,
+        pdb_ids=pdb_ids,
         num_cpu=num_cpu,
     )

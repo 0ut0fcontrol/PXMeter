@@ -302,10 +302,18 @@ class ProtenixInput:
                     modifications = []
                     for m in entity_dict.get("modifications", []):
                         if entity_type == PROTEIN:
-                            modifications.append((int(m["ptmPosition"]), m["ptmType"]))
+                            modifications.append(
+                                (
+                                    int(m["ptmPosition"]),
+                                    m["ptmType"].replace("CCD_", ""),
+                                )
+                            )
                         else:
                             modifications.append(
-                                (int(m["basePosition"]), m["modificationType"])
+                                (
+                                    int(m["basePosition"]),
+                                    m["modificationType"].replace("CCD_", ""),
+                                )
                             )
 
                     seq_obj = PolymerChainSequence(

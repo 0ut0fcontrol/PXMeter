@@ -1,5 +1,4 @@
 biotite>=1.2.0
-dockq==2.1.3
 joblib
 ml_collections
 numpy

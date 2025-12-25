@@ -14,18 +14,15 @@
 
 import copy
 import dataclasses
-import gzip
 import json
 import logging
 import tempfile
 from pathlib import Path
 from typing import Any
 
-import DockQ.parsers as dockq_parsers
 import numpy as np
 import pandas as pd
 from biotite.structure.io import pdb
-from DockQ.DockQ import run_on_all_native_interfaces
 from ml_collections.config_dict import ConfigDict
 from posebusters import PoseBusters
 from rdkit import Chem
@@ -35,97 +32,11 @@ from pxmeter.constants import IONS, LIGAND
 from pxmeter.data.ccd import get_ccd_mol_from_chain_atom_array
 from pxmeter.data.struct import Structure
 from pxmeter.metrics.clashes import check_clashes_by_vdw
+from pxmeter.metrics.dockq import compute_dockq
 from pxmeter.metrics.lddt_metrics import LDDT
 from pxmeter.metrics.rmsd_metrics import RMSDMetrics
 
 logging.getLogger("posebusters").setLevel(logging.ERROR)
-
-
-def load_PDB(path, chains=None, small_molecule=False, n_model=0):
-    """
-    Modified from DockQ.DockQ.load_PDB to avoid ResourceWarning warnings.
-    ResourceWarning: Enable tracemalloc to get the object allocation traceback
-    DockQ/DockQ.py:660: ResourceWarning: unclosed file
-    """
-    if chains is None:
-        chains = []
-    try:
-        pdb_parser = dockq_parsers.PDBParser(QUIET=True)
-        with (
-            gzip.open(path, "rt") if path.endswith(".gz") else open(path, "rt")
-        ) as file_obj:
-            model = pdb_parser.get_structure(
-                "-",
-                file_obj,
-                chains=chains,
-                parse_hetatms=small_molecule,
-                model_number=n_model,
-            )
-    except Exception:
-        pdb_parser = dockq_parsers.MMCIFParser(QUIET=True)
-        with (
-            gzip.open(path, "rt") if path.endswith(".gz") else open(path, "rt")
-        ) as file_obj:
-            model = pdb_parser.get_structure(
-                "-",
-                file_obj,
-                chains=chains,
-                parse_hetatms=small_molecule,
-                auth_chains=not small_molecule,
-                model_number=n_model,
-            )
-    model.id = path
-    return model
-
-
-def compute_dockq(
-    ref_struct: Structure,
-    model_struct: Structure,
-    ref_to_model_chain_map: dict[str, str],
-) -> dict[str, dict[str, Any]]:
-    """
-    Computes the DockQ score between a reference structure and a model structure.
-
-    Args:
-        ref_struct (Structure): The reference structure.
-        model_struct (Structure): The model structure to be evaluated.
-        ref_to_model_chain_map (dict[str, str]): A dictionary mapping reference chain IDs to model chain IDs.
-
-    Returns:
-        dict[str, dict[str, Any]]: A dictionary containing the DockQ score and other related metrics.
-    """
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_dir = Path(tmp_dir)
-        tmp_ref_cif = tmp_dir / "tmp_ref.cif"
-        tmp_model_cif = tmp_dir / "tmp_model.cif"
-
-        # Calculate DockQ using exclusively valid atoms
-        # Use uni_chain_id as label_asym_id
-        ref_struct.to_cif(tmp_ref_cif, use_uni_chain_id=True)
-        model_struct.to_cif(tmp_model_cif, use_uni_chain_id=True)
-
-        # small_molecule=False means only polymer is considered
-        model = load_PDB(str(tmp_model_cif), small_molecule=False)
-        native = load_PDB(str(tmp_ref_cif), small_molecule=False)
-
-        native_chains = [c.id for c in native]
-        model_chains = [c.id for c in model]
-
-        valid_ref_to_model_chain_map = {}
-        for k, v in ref_to_model_chain_map.items():
-            if (
-                k in ref_struct.uni_chain_id
-                and k in native_chains
-                and v in model_chains
-            ):
-                # some all UNK structure will not be load by load_PDB(), e.g. chain Q in 7q6i
-                valid_ref_to_model_chain_map[k] = v
-                assert v in model_struct.uni_chain_id
-
-    dockq_result_dict, _total_dockq = run_on_all_native_interfaces(
-        model, native, chain_map=valid_ref_to_model_chain_map
-    )
-    return dockq_result_dict
 
 
 def compute_pb_valid(

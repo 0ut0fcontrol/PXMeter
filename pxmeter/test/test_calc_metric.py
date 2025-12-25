@@ -16,9 +16,6 @@ import logging
 import time
 import unittest
 
-from DockQ.DockQ import run_on_all_native_interfaces
-
-from pxmeter.calc_metric import load_PDB
 from pxmeter.configs.run_config import RUN_CONFIG
 from pxmeter.eval import evaluate
 from pxmeter.test.test_utils import TEST_DATA_DIR
@@ -35,25 +32,7 @@ class TestCalcMetric(unittest.TestCase):
 
     def tearDown(self):
         elapsed_time = time.time() - self._start_time
-        logging.info(f"Test {self.id()} took {elapsed_time:.6f}s")
-
-    @staticmethod
-    def _calc_dockq(ref_cif, model_cif, ref_to_model_chain_map):
-        model = load_PDB(str(model_cif), small_molecule=False)
-        native = load_PDB(str(ref_cif), small_molecule=False)
-
-        native_chains = [c.id for c in native]
-        model_chains = [c.id for c in model]
-        valid_ref_to_model_chain_map = {}
-        for k, v in ref_to_model_chain_map.items():
-            if k in native_chains:
-                valid_ref_to_model_chain_map[k] = v
-                assert v in model_chains
-
-        dockq_result_dict, _total_dockq = run_on_all_native_interfaces(
-            model, native, chain_map=valid_ref_to_model_chain_map
-        )
-        return dockq_result_dict
+        logging.info("Test %s took %.6f seconds", self.id(), elapsed_time)
 
     def test_metric(self):
         """
@@ -70,31 +49,26 @@ class TestCalcMetric(unittest.TestCase):
         )
         result_dict = result.to_json_dict()
 
-        # Check DockQ result
-        dockq_result = TestCalcMetric._calc_dockq(
-            ref_cif,
-            model_cif,
-            ref_to_model_chain_map={
-                "A": "B0",
-                "B": "C0",
-                "C": "A0",
-            },
-        )
+        # Check DockQ result (Ground Truth from official DockQ implementation)
+        # Interface mapping based on chain map: {"A": "B0", "B": "C0", "C": "A0"}
+        # Ref A-B -> Model B0-C0 (interface "B,C")
+        # Ref A-C -> Model B0-A0 (interface "A,B")
+        # Ref B-C -> Model C0-A0 (interface "A,C")
 
         self.assertAlmostEqual(
-            dockq_result["AB"]["DockQ"],
+            0.84754176,
             result_dict["interface"]["B,C"]["dockq"],
-            delta=1e-2,
+            delta=1e-6,
         )
         self.assertAlmostEqual(
-            dockq_result["AC"]["DockQ"],
+            0.71798609,
             result_dict["interface"]["A,B"]["dockq"],
-            delta=1e-2,
+            delta=1e-6,
         )
         self.assertAlmostEqual(
-            dockq_result["BC"]["DockQ"],
+            0.66608325,
             result_dict["interface"]["A,C"]["dockq"],
-            delta=1e-2,
+            delta=1e-6,
         )
 
 

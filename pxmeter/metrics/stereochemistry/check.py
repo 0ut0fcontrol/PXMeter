@@ -985,7 +985,7 @@ class StereoChemValidator:
         else:
             query_mask = np.asarray(query_mask, dtype=bool)
 
-        bonds = atom_array.bonds
+        bonds = atom_array.bonds.copy()
         if self.ref_struct is not None:
             # Add bonds from reference structure if available
             assert len(self.ref_struct.atom_array) == n_atoms

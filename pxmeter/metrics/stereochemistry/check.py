@@ -16,7 +16,6 @@ from typing import Sequence
 
 import numpy as np
 import pandas as pd
-from biotite.structure import AtomArray
 from biotite.structure.info.radii import vdw_radius_single
 from scipy.spatial import KDTree
 
@@ -64,65 +63,46 @@ class StereoChemValidator:
         self.ref_struct = ref_struct
         self.atom_array = struct.atom_array
         self.entity_poly_type = struct.entity_poly_type
-        self.res_groups = self._preprocess_residue_groups(struct.atom_array)
+
+        # Cache common fields to avoid repeated property access
+        self._uni_chain_id = struct.uni_chain_id
+        self._res_id = self.atom_array.res_id
+        self._res_name = self.atom_array.res_name
+        self._atom_name = self.atom_array.atom_name
+
+        self.res_groups = self._preprocess_residue_groups()
         self.inter_res_types = self._classify_inter_residue_types()
 
-    @staticmethod
     def _preprocess_residue_groups(
-        atom_array: AtomArray,
+        self,
     ) -> dict[str, dict[str, np.ndarray]]:
         """
         Precompute residue-wise atom groups for bond/angle checks.
-
-        This function groups atoms by residue name and, within each
-        residue type, assigns a group ID to each residue instance
-        identified by ``(chain_id, res_id)``. The result can be reused
-        by bond/angle validation functions to avoid per-residue Python
-        loops.
-
-        Args:
-            atom_array: Biotite ``AtomArray`` containing at least the
-                fields ``res_name``, ``chain_id`` and ``res_id``.
-
-        Returns:
-            dict[str, dict[str, np.ndarray]]: A mapping from residue
-            name (e.g. ``"ALA"``) to a dictionary with the following
-            keys:
-
-            - ``"idx_res"`` (np.ndarray, shape (N_res_atoms,), dtype=int):
-              Global atom indices in the original ``atom_array`` for all
-              atoms of this residue type.
-            - ``"group_ids"`` (np.ndarray, shape (N_res_atoms,), dtype=int):
-              Residue group index for each atom within this residue
-              type. Atoms with the same value correspond to the same
-              ``(chain_id, res_id)`` residue instance.
-            - ``"n_groups"`` (int): Number of residue instances of this
-              residue type in the structure.
+        Optimized to avoid string concatenation and reduce Python loops.
         """
-        res_name = np.asarray(atom_array.res_name).astype(str)
-        chain_id = np.asarray(atom_array.chain_id).astype(str)
-        res_id = np.asarray(atom_array.res_id)
+        res_names = self._res_name
+        chain_ids = self._uni_chain_id
+        res_ids = self._res_id
 
-        unique_res = np.unique(res_name)
+        # Map chain IDs to integers for faster grouping
+        _unique_chains, chain_ints = np.unique(chain_ids, return_inverse=True)
+
+        unique_res_types = np.unique(res_names)
         res_groups: dict[str, dict[str, np.ndarray]] = {}
 
-        for rname in unique_res:
-            idx_res = np.where(res_name == rname)[0]
+        for rname in unique_res_types:
+            idx_res = np.where(res_names == rname)[0]
             if idx_res.size == 0:
                 continue
 
-            chain_res = chain_id[idx_res]
-            resid_res = res_id[idx_res]
-
-            # Build a per-residue key "(chain, res_id)" for grouping
-            keys = np.char.add(chain_res, resid_res.astype(str))
-
-            _, group_ids_res = np.unique(keys, return_inverse=True)
-            n_groups = int(group_ids_res.max()) + 1
+            # Group by (chain_int, res_id) using np.unique on integers
+            group_keys = np.stack([chain_ints[idx_res], res_ids[idx_res]], axis=1)
+            _, group_ids_res = np.unique(group_keys, axis=0, return_inverse=True)
+            n_groups = int(group_ids_res.max()) + 1 if group_ids_res.size > 0 else 0
 
             res_groups[rname] = {
-                "idx_res": idx_res,  # Global indices for this residue type
-                "group_ids": group_ids_res,  # Residue group index per atom
+                "idx_res": idx_res,
+                "group_ids": group_ids_res,
                 "n_groups": n_groups,
             }
 
@@ -158,114 +138,99 @@ class StereoChemValidator:
         y = np.dot(np.cross(b1, v), w)
         return np.arctan2(y, x)
 
-    def _classify_single_pro_residue_type(
-        self,
-        chain_pro: str,
-        resid_pro: int,
-        entity_types_arr: np.ndarray,
-    ) -> str | None:
-        """
-        Classify a single PRO residue as PRO_CIS / PRO_TRANS.
-
-        Args:
-            chain_pro: Chain ID of the PRO residue.
-            resid_pro: Residue ID of the PRO residue.
-            entity_types_arr: 1D array, same length as atom_array,
-                giving per-atom entity type (e.g. PROTEIN / DNA / RNA / OTHER).
-
-        Returns:
-            "PRO_CIS", "PRO_TRANS", or None if classification fails.
-        """
-        atom_array = self.atom_array
-        chain_id = self.struct.uni_chain_id
-        res_id = atom_array.res_id
-        atom_name = atom_array.atom_name
-        coords = atom_array.coord
-
-        prev_mask = (
-            (chain_id == chain_pro)
-            & (res_id < resid_pro)
-            & (entity_types_arr == PROTEIN)
-        )
-        if not np.any(prev_mask):
-            return None
-
-        prev_res_ids = np.unique(res_id[prev_mask])
-        prev_resid = int(prev_res_ids.max())
-
-        def _find_atom(chain: str, resid: int, name: str) -> int | None:
-            mask = (chain_id == chain) & (res_id == resid) & (atom_name == name)
-            idx = np.where(mask)[0]
-            return int(idx[0]) if idx.size > 0 else None
-
-        idx_ca0 = _find_atom(chain_pro, prev_resid, "CA")
-        idx_c0 = _find_atom(chain_pro, prev_resid, "C")
-        idx_n1 = _find_atom(chain_pro, resid_pro, "N")
-        idx_ca1 = _find_atom(chain_pro, resid_pro, "CA")
-
-        if None in (idx_ca0, idx_c0, idx_n1, idx_ca1):
-            return None
-
-        p_ca0 = coords[idx_ca0]
-        p_c0 = coords[idx_c0]
-        p_n1 = coords[idx_n1]
-        p_ca1 = coords[idx_ca1]
-
-        omega = self._compute_dihedral(p_ca0, p_c0, p_n1, p_ca1)
-        if np.isnan(omega):
-            return None
-
-        # OpenStructure: abs(omega) < 1.57 rad (~90°) -> cis
-        if abs(omega) < 1.57:
-            return "PRO_CIS"
-        else:
-            return "PRO_TRANS"
-
     def _classify_inter_residue_types(self) -> np.ndarray:
         entity_mapping = {PROTEIN: "PEPTIDE", DNA: "NA", RNA: "NA"}
 
+        label_entity_ids = self.atom_array.label_entity_id
         entity_types = np.array(
-            [
-                self.entity_poly_type.get(ent_id, "OTHER")
-                for ent_id in self.atom_array.label_entity_id
-            ],
+            [self.entity_poly_type.get(eid, "OTHER") for eid in label_entity_ids],
             dtype=object,
         )
+
         inter_res_types = np.array(
-            [entity_mapping.get(t, "OTHER") for t in entity_types],
-            dtype=object,
+            [entity_mapping.get(t, "OTHER") for t in entity_types], dtype=object
         )
 
         # Update GLY types
-        gly_mask = (self.atom_array.res_name == "GLY") & (entity_types == PROTEIN)
+        gly_mask = (self._res_name == "GLY") & (entity_types == PROTEIN)
         inter_res_types[gly_mask] = "GLY"
 
         # Update PRO_CIS/TRANS types
-        pro_mask = (self.atom_array.res_name == "PRO") & (entity_types == PROTEIN)
+        pro_mask = (self._res_name == "PRO") & (entity_types == PROTEIN)
         if not np.any(pro_mask):
             return inter_res_types
 
-        chain_id = self.struct.uni_chain_id
-        res_id = self.atom_array.res_id
+        # Optimization: Pre-index atoms for Proline classification
+        atom_name = self._atom_name
+        chain_id = self._uni_chain_id
+        res_id = self._res_id
+        coords = self.atom_array.coord
 
-        pro_res_keys = sorted(
-            set((chain_id[i], int(res_id[i])) for i in np.where(pro_mask)[0]),
-            key=lambda x: (x[0], x[1]),
-        )
+        # Find CA, N indices once
+        ca_mask = atom_name == "CA"
+        n_mask = atom_name == "N"
 
-        entity_types_arr = np.asarray(entity_types, dtype=object)
+        # Map (chain, res_id) -> atom indices for CA, N
+        def get_atom_map(mask):
+            indices = np.where(mask)[0]
+            return {(chain_id[i], res_id[i]): i for i in indices}
 
-        for chain_pro, resid_pro in pro_res_keys:
-            pro_type = self._classify_single_pro_residue_type(
-                chain_pro,
-                resid_pro,
-                entity_types_arr,
-            )
-            if pro_type is None:
+        ca_map = get_atom_map(ca_mask)
+        n_map = get_atom_map(n_mask)
+
+        # Find all Proline residues
+        pro_indices = np.where(pro_mask)[0]
+        if pro_indices.size == 0:
+            return inter_res_types
+
+        # Pre-calculate residue indices for faster update
+        # We can use (chain_id, res_id) or just use the fact that atoms in a residue are usually contiguous.
+        # But to be safe, let's use a unique residue identifier.
+        combined_res_keys = np.stack([chain_id, res_id], axis=1)
+        _, res_indices = np.unique(combined_res_keys, axis=0, return_inverse=True)
+
+        pro_res_keys = sorted(set((chain_id[i], res_id[i]) for i in pro_indices))
+
+        for c_pro, r_pro in pro_res_keys:
+            # Need prev CA (ca0), prev C (c0), current N (n1), current CA (ca1)
+            # Find previous residue in the same chain
+            # Since we don't know the exact residue ID of the previous one (might not be r_pro - 1)
+            # but usually it is. Let's find the max resid < r_pro in the same chain.
+            # Actually, to be safe and fast, we can use the fact that it's a peptide bond.
+            # The current N (n1) must be bonded to a C (c0) of the previous residue.
+
+            n1_idx = n_map.get((c_pro, r_pro))
+            if n1_idx is None:
                 continue
 
-            mask_pro_res = (chain_id == chain_pro) & (res_id == resid_pro)
-            inter_res_types[mask_pro_res] = pro_type
+            # Use bond information to find the previous C
+            bonded_to_n1, _ = self.atom_array.bonds.get_bonds(n1_idx)
+            c0_idx = None
+            for b_idx in bonded_to_n1:
+                if atom_name[b_idx] == "C" and (chain_id[b_idx], res_id[b_idx]) != (
+                    c_pro,
+                    r_pro,
+                ):
+                    c0_idx = b_idx
+                    break
+
+            if c0_idx is None:
+                continue
+
+            # Now we have c0 and n1. We need ca0 (bonded to c0) and ca1 (bonded to n1)
+            ca1_idx = ca_map.get((c_pro, r_pro))
+            prev_res_key = (chain_id[c0_idx], res_id[c0_idx])
+            ca0_idx = ca_map.get(prev_res_key)
+
+            if ca0_idx is None or ca1_idx is None:
+                continue
+
+            p_ca0, p_c0, p_n1, p_ca1 = coords[[ca0_idx, c0_idx, n1_idx, ca1_idx]]
+            omega = self._compute_dihedral(p_ca0, p_c0, p_n1, p_ca1)
+
+            if not np.isnan(omega):
+                pro_type = "PRO_CIS" if abs(omega) < 1.57 else "PRO_TRANS"
+                inter_res_types[res_indices == res_indices[n1_idx]] = pro_type
 
         return inter_res_types
 
@@ -332,185 +297,99 @@ class StereoChemValidator:
     ) -> pd.DataFrame:
         """
         Detect inter-residue bond-length outliers.
-
-        This method checks *inter-residue* bonds (e.g. peptide C-N,
-        nucleic-acid O3'-P) using group-specific parameter sets defined
-        in ``inter_res_bond_data``.
-
-        The residue type for each atom is precomputed once in
-        :meth:`_classify_inter_residue_types` and stored in
-        ``self.inter_res_types``. For a covalent bond between atoms
-        i and j, the parameter group is determined from their shared
-        inter-residue type::
-
-            group_i = self.inter_res_types[idx_i]
-            group_j = self.inter_res_types[idx_j]
-
-        Only bonds where ``group_i == group_j`` and the resulting group
-        exists in ``inter_res_bond_data`` are considered. In addition,
-        the two atoms must belong to different residues (i.e. truly
-        inter-residue). Bond keys are matched in an order-independent
-        manner by trying both ``ATOM1_ATOM2`` and ``ATOM2_ATOM1``.
-
-        An inter-residue bond is reported as an outlier if its z-score
-        exceeds ``z_thresh`` in absolute value::
-
-            z = (length - ideal) / sigma
-
-        Args:
-            inter_res_bond_data: Mapping from group name (e.g.
-                ``"PEPTIDE"``, ``"GLY"``, ``"NA"``, ``"PRO_CIS"``,
-                ``"PRO_TRANS"``) to a mapping
-                ``bond_key -> (ideal, sigma)``, where:
-
-                * ``bond_key`` is a string of the form
-                  ``"ATOM1_ATOM2"``, e.g. ``"C_N"``, ``"O3'_P"``.
-                * ``ideal`` is the ideal bond length in Å.
-                * ``sigma`` is the standard deviation used for z-score
-                  computation.
-
-                If ``None``, the default :data:`INTER_RES_BOND_DATA`
-                will be used.
-            z_thresh: Z-score threshold above which a bond is considered
-                an outlier. Defaults to ``12.0``.
-
-        Returns:
-            pd.DataFrame: A DataFrame describing only the inter-residue
-            bonds that exceed the z-score threshold. If no out-of-range
-            bonds are found, an empty DataFrame is returned.
-
-            The DataFrame has the following columns:
-
-            * ``"group"``       - parameter group name (e.g. ``"NA"``,
-              ``"PEPTIDE"``).
-            * ``"bond_key"``    - bond key string used in the parameter
-              table.
-            * ``"idx1"``        - global atom index of atom 1
-              (the lower index in the pair).
-            * ``"idx2"``        - global atom index of atom 2
-              (the higher index in the pair).
-            * ``"res_name1"``   - residue name of atom 1.
-            * ``"res_name2"``   - residue name of atom 2.
-            * ``"chain_id1"``   - chain ID of atom 1.
-            * ``"chain_id2"``   - chain ID of atom 2.
-            * ``"res_id1"``     - residue ID of atom 1.
-            * ``"res_id2"``     - residue ID of atom 2.
-            * ``"atom_name1"``  - atom name of atom 1.
-            * ``"atom_name2"``  - atom name of atom 2.
-            * ``"ideal"``       - ideal bond length used for this bond.
-            * ``"sigma"``       - standard deviation used for this bond.
-            * ``"length"``      - observed bond length in Å.
-            * ``"z_score"``     - z-score of the observed bond length.
         """
         if inter_res_bond_data is None:
             inter_res_bond_data = INTER_RES_BOND_DATA
 
         atom_array = self.atom_array
         coords = atom_array.coord
-
-        atom_name_arr = atom_array.atom_name
-        res_name_arr = atom_array.res_name
-        chain_id_arr = self.struct.uni_chain_id
-        res_id_arr = atom_array.res_id
-
-        # Per-atom inter-residue type, e.g. "NA", "PEPTIDE",
-        # "GLY", "PRO_CIS", "PRO_TRANS", "OTHER".
+        atom_names = self._atom_name
+        res_names = self._res_name
+        chain_ids = self._uni_chain_id
+        res_ids = self._res_id
         inter_types = self.inter_res_types
 
-        bad_records: list[dict[str, np.ndarray]] = []
+        # Get all bond pairs (idx1, idx2)
+        bond_array = atom_array.bonds.as_array()
+        idx1 = bond_array[:, 0]
+        idx2 = bond_array[:, 1]
 
-        n_atoms = len(atom_array)
-        for idx1 in range(n_atoms):
-            group1 = inter_types[idx1]
-            if group1 not in inter_res_bond_data:
-                # This atom does not belong to any parameterized group
-                continue
+        # Filter: Different residues
+        # Fast residue comparison using chain_id and res_id
+        # We can use a hash or just compare both fields
+        diff_res_mask = (chain_ids[idx1] != chain_ids[idx2]) | (
+            res_ids[idx1] != res_ids[idx2]
+        )
+        idx1, idx2 = idx1[diff_res_mask], idx2[diff_res_mask]
 
-            name1 = atom_name_arr[idx1]
-
-            # All atoms covalently bonded to idx1
-            bonded_indices, _bond_types = atom_array.bonds.get_bonds(idx1)
-            if len(bonded_indices) == 0:
-                continue
-
-            group_params = inter_res_bond_data[group1]
-
-            for idx2 in bonded_indices:
-                # Avoid double counting: enforce idx1 < idx2
-                if idx1 >= idx2:
-                    continue
-
-                group2 = inter_types[idx2]
-                if group2 != group1:
-                    # Different inter-residue type -> no shared parameter set
-                    continue
-
-                # Require different residues => truly inter-residue
-                res_key1 = (chain_id_arr[idx1], int(res_id_arr[idx1]))
-                res_key2 = (chain_id_arr[idx2], int(res_id_arr[idx2]))
-                if res_key1 == res_key2:
-                    # Intra-residue bond; handled by intra-res tables
-                    continue
-
-                name2 = atom_name_arr[idx2]
-
-                # Try both ATOM1_ATOM2 and ATOM2_ATOM1
-                key_12 = f"{name1}_{name2}"
-                key_21 = f"{name2}_{name1}"
-
-                if key_12 in group_params:
-                    bond_key = key_12
-                    ideal, sigma = group_params[key_12]
-                    idx1_use, idx2_use = idx1, idx2
-                    name1_use, name2_use = name1, name2
-                elif key_21 in group_params:
-                    bond_key = key_21
-                    ideal, sigma = group_params[key_21]
-                    # Swap roles to match parameter key order
-                    idx1_use, idx2_use = idx2, idx1
-                    name1_use, name2_use = name2, name1
-                else:
-                    # This particular bonded pair is not parameterized
-                    continue
-
-                # Compute bond length
-                p1 = coords[idx1_use]
-                p2 = coords[idx2_use]
-                length = float(np.linalg.norm(p1 - p2))
-
-                z = (length - ideal) / sigma
-                if np.abs(z) <= z_thresh:
-                    continue
-
-                bad_records.append(
-                    {
-                        "group": np.array([group1], dtype=object),
-                        "bond_key": np.array([bond_key], dtype=object),
-                        "idx1": np.array([idx1_use], dtype=int),
-                        "idx2": np.array([idx2_use], dtype=int),
-                        "res_name1": np.array([res_name_arr[idx1_use]], dtype=object),
-                        "res_name2": np.array([res_name_arr[idx2_use]], dtype=object),
-                        "chain_id1": np.array([chain_id_arr[idx1_use]], dtype=object),
-                        "chain_id2": np.array([chain_id_arr[idx2_use]], dtype=object),
-                        "res_id1": np.array([res_id_arr[idx1_use]], dtype=int),
-                        "res_id2": np.array([res_id_arr[idx2_use]], dtype=int),
-                        "atom_name1": np.array([name1_use], dtype=object),
-                        "atom_name2": np.array([name2_use], dtype=object),
-                        "ideal": np.array([ideal], dtype=float),
-                        "sigma": np.array([sigma], dtype=float),
-                        "length": np.array([length], dtype=float),
-                        "z_score": np.array([z], dtype=float),
-                    }
-                )
-
-        if not bad_records:
+        if idx1.size == 0:
             return pd.DataFrame()
 
-        out: dict[str, np.ndarray] = {}
-        for key in bad_records[0].keys():
-            out[key] = np.concatenate([r[key] for r in bad_records])
+        bad_dfs = []
+        for group, params in inter_res_bond_data.items():
+            # Filter bonds where both atoms belong to this group
+            group_mask = (inter_types[idx1] == group) & (inter_types[idx2] == group)
+            g_idx1, g_idx2 = idx1[group_mask], idx2[group_mask]
+            if g_idx1.size == 0:
+                continue
 
-        return pd.DataFrame(out)
+            for bond_key, (ideal, sigma) in params.items():
+                name_a, name_b = bond_key.split("_")
+
+                # Check both directions
+                mask_ab = (atom_names[g_idx1] == name_a) & (
+                    atom_names[g_idx2] == name_b
+                )
+                mask_ba = (atom_names[g_idx1] == name_b) & (
+                    atom_names[g_idx2] == name_a
+                )
+
+                final_mask = mask_ab | mask_ba
+                if not np.any(final_mask):
+                    continue
+
+                # Use mask_ba to swap idx1/idx2 if needed to match name_a/name_b order
+                ia = np.where(mask_ab, g_idx1, g_idx2)[final_mask]
+                ib = np.where(mask_ab, g_idx2, g_idx1)[final_mask]
+
+                # Compute lengths
+                lengths = np.linalg.norm(coords[ia] - coords[ib], axis=1)
+                z_scores = (lengths - ideal) / sigma
+
+                bad_mask = np.abs(z_scores) > z_thresh
+                if not np.any(bad_mask):
+                    continue
+
+                ia_bad = ia[bad_mask]
+                ib_bad = ib[bad_mask]
+
+                bad_dfs.append(
+                    pd.DataFrame(
+                        {
+                            "group": group,
+                            "bond_key": bond_key,
+                            "idx1": ia_bad,
+                            "idx2": ib_bad,
+                            "res_name1": res_names[ia_bad],
+                            "res_name2": res_names[ib_bad],
+                            "chain_id1": chain_ids[ia_bad],
+                            "chain_id2": chain_ids[ib_bad],
+                            "res_id1": res_ids[ia_bad],
+                            "res_id2": res_ids[ib_bad],
+                            "atom_name1": atom_names[ia_bad],
+                            "atom_name2": atom_names[ib_bad],
+                            "ideal": ideal,
+                            "sigma": sigma,
+                            "length": lengths[bad_mask],
+                            "z_score": z_scores[bad_mask],
+                        }
+                    )
+                )
+
+        if not bad_dfs:
+            return pd.DataFrame()
+
+        return pd.concat(bad_dfs, ignore_index=True)
 
     def find_bad_intra_res_bonds(
         self,
@@ -572,13 +451,12 @@ class StereoChemValidator:
         if bond_data is None:
             bond_data = BOND_DATA
 
-        atom_array = self.atom_array
         res_groups = self.res_groups
 
-        atom_name = atom_array.atom_name
-        chain_id = self.struct.uni_chain_id
-        res_id = atom_array.res_id
-        coords = atom_array.coord  # (N, 3)
+        atom_name = self._atom_name
+        chain_id = self._uni_chain_id
+        res_id = self._res_id
+        coords = self.atom_array.coord  # (N, 3)
 
         bad_records: list[dict[str, np.ndarray]] = []
 
@@ -679,252 +557,157 @@ class StereoChemValidator:
     ) -> pd.DataFrame:
         """
         Detect inter-residue backbone angle outliers.
-
-        This method checks *inter-residue* backbone angles such as
-        peptide and nucleic-acid linkage angles using residue-type-
-        specific parameter sets defined in ``inter_res_angle_data``.
-
-        The residue type for each atom is precomputed once in
-        :meth:`_classify_inter_residue_types` and stored in
-        ``self.inter_res_types``. For an angle A-B-C, the parameter
-        group is determined from the shared inter-residue type of all
-        three atoms::
-
-            group_a = self.inter_res_types[idx_a]
-            group_b = self.inter_res_types[idx_b]
-            group_c = self.inter_res_types[idx_c]
-
-        Only angles where ``group_a == group_b == group_c`` and
-        ``group_b`` exists in ``inter_res_angle_data`` are considered.
-        In addition, the three atoms must span at least two distinct
-        residues (i.e. truly inter-residue).
-
-        Typical groups include:
-
-        * ``"NA"``        - nucleic-acid linkage angles
-        * ``"PEPTIDE"``   - generic peptide backbone
-        * ``"GLY"``       - glycine-specific peptide parameters
-        * ``"PRO_CIS"``   - cis proline peptide bond
-        * ``"PRO_TRANS"`` - trans proline peptide bond
-
-        An angle is reported as an outlier if its z-score exceeds
-        ``z_thresh`` in absolute value::
-
-            z = (angle_deg - ideal) / sigma
-
-        Args:
-            inter_res_angle_data: Mapping from group name (e.g.
-                ``"PEPTIDE"``, ``"GLY"``, ``"NA"``) to a mapping
-                ``angle_key -> (ideal, sigma)``, where:
-
-                * ``angle_key`` is a string of the form
-                  ``"ATOM_A_ATOM_B_ATOM_C"``, e.g. ``"CA_C_N"`` where
-                  ``ATOM_B`` is the central atom.
-                * ``ideal`` is the ideal bond angle in degrees.
-                * ``sigma`` is the standard deviation used for z-score
-                  computation.
-
-                If ``None``, the default :data:`INTER_RES_ANGLE_DATA`
-                will be used.
-            z_thresh: Z-score threshold above which an angle is
-                considered an outlier. Defaults to ``12.0``.
-
-        Returns:
-            pd.DataFrame: A DataFrame describing only the inter-residue
-            angles that exceed the z-score threshold. If no out-of-range
-            angles are found, an empty DataFrame is returned.
-
-            The DataFrame has the following columns:
-
-            * ``"group"``        - parameter group name (e.g. ``"NA"``,
-              ``"PEPTIDE"``).
-            * ``"angle_key"``    - angle key string used in the parameter
-              table.
-            * ``"idx_a"``        - global atom index of atom A.
-            * ``"idx_b"``        - global atom index of atom B (central).
-            * ``"idx_c"``        - global atom index of atom C.
-            * ``"res_name_a"``   - residue name of atom A.
-            * ``"res_name_b"``   - residue name of atom B.
-            * ``"res_name_c"``   - residue name of atom C.
-            * ``"chain_id_a"``   - chain ID of atom A.
-            * ``"chain_id_b"``   - chain ID of atom B.
-            * ``"chain_id_c"``   - chain ID of atom C.
-            * ``"res_id_a"``     - residue ID of atom A.
-            * ``"res_id_b"``     - residue ID of atom B.
-            * ``"res_id_c"``     - residue ID of atom C.
-            * ``"atom_name_a"``  - atom name of A.
-            * ``"atom_name_b"``  - atom name of B.
-            * ``"atom_name_c"``  - atom name of C.
-            * ``"ideal"``        - ideal angle (degrees) used for this
-              triplet.
-            * ``"sigma"``        - standard deviation used for this
-              angle.
-            * ``"angle"``        - observed angle in degrees.
-            * ``"z_score"``      - z-score of the observed angle.
+        Vectorized version to avoid Python loops over atoms.
         """
         if inter_res_angle_data is None:
             inter_res_angle_data = INTER_RES_ANGLE_DATA
 
         atom_array = self.atom_array
         coords = atom_array.coord
-
-        atom_name_arr = atom_array.atom_name
-        res_name_arr = atom_array.res_name
-        chain_id_arr = self.struct.uni_chain_id
-        res_id_arr = atom_array.res_id
-
-        # Per-atom inter-residue type, e.g. "NA", "PEPTIDE",
-        # "GLY", "PRO_CIS", "PRO_TRANS", "OTHER".
+        atom_names = self._atom_name
+        res_names = self._res_name
+        chain_ids = self._uni_chain_id
+        res_ids = self._res_id
         inter_types = self.inter_res_types
 
-        bad_records: list[dict[str, np.ndarray]] = []
+        # Get all bonds and build adjacency
+        bond_array = atom_array.bonds.as_array()[:, :2]
+        all_bonds = np.concatenate([bond_array, bond_array[:, ::-1]], axis=0)
 
-        n_atoms = len(atom_array)
-        for idx_b in range(n_atoms):
-            group_b = inter_types[idx_b]
-            if group_b not in inter_res_angle_data:
-                # Central atom does not belong to any parameterized group
-                continue
+        # We'll use a dictionary to store neighbor indices for each atom
+        # This is still a bit of Python, but we only do it once.
+        # Alternatively, we can use the join approach.
 
-            b_name = atom_name_arr[idx_b]
-            group_params = inter_res_angle_data[group_b]
+        bad_dfs = []
+        for group, params in inter_res_angle_data.items():
+            for angle_key, (ideal, sigma) in params.items():
+                name_a, name_b, name_c = angle_key.split("_")
 
-            # All atoms covalently bonded to B
-            bonded_indices, _bond_types = atom_array.bonds.get_bonds(idx_b)
-            if len(bonded_indices) < 2:
-                continue
+                # Find all potential central atoms B
+                idx_b_all = np.where((atom_names == name_b) & (inter_types == group))[0]
+                if idx_b_all.size == 0:
+                    continue
 
-            # Enumerate all unordered neighbor pairs (A, C) around B
-            for i, idx_a in enumerate(bonded_indices):
-                for idx_c in bonded_indices[i + 1 :]:
-                    group_a = inter_types[idx_a]
-                    group_c = inter_types[idx_c]
+                # For each B, find neighbors A and C
+                # This part is tricky to vectorize fully without a join.
+                # Let's use the join approach:
+                # Find all bonds (A, B) where A has name_a and B has name_b and both in group
+                # Find all bonds (B, C) where B has name_b and C has name_c and both in group
 
-                    # All three atoms must share the same inter-residue type
-                    if group_a != group_b or group_c != group_b:
-                        continue
+                mask_ab = (
+                    (atom_names[all_bonds[:, 0]] == name_a)
+                    & (atom_names[all_bonds[:, 1]] == name_b)
+                    & (inter_types[all_bonds[:, 0]] == group)
+                    & (inter_types[all_bonds[:, 1]] == group)
+                )
 
-                    # Require at least two distinct residues among A, B, C
-                    res_keys = {
-                        (chain_id_arr[idx_a], int(res_id_arr[idx_a])),
-                        (chain_id_arr[idx_b], int(res_id_arr[idx_b])),
-                        (chain_id_arr[idx_c], int(res_id_arr[idx_c])),
-                    }
-                    if len(res_keys) < 2:
-                        # Purely intra-residue angle; handled by intra-res tables
-                        continue
+                mask_bc = (
+                    (atom_names[all_bonds[:, 0]] == name_b)
+                    & (atom_names[all_bonds[:, 1]] == name_c)
+                    & (inter_types[all_bonds[:, 0]] == group)
+                    & (inter_types[all_bonds[:, 1]] == group)
+                )
 
-                    a_name = atom_name_arr[idx_a]
-                    c_name = atom_name_arr[idx_c]
+                bonds_ab = all_bonds[mask_ab]  # (idx_a, idx_b)
+                bonds_bc = all_bonds[mask_bc]  # (idx_b, idx_c)
 
-                    # Try both A-B-C and C-B-A keys (angle is symmetric)
-                    key_abc = f"{a_name}_{b_name}_{c_name}"
-                    key_cba = f"{c_name}_{b_name}_{a_name}"
+                if bonds_ab.size == 0 or bonds_bc.size == 0:
+                    continue
 
-                    if key_abc in group_params:
-                        angle_key = key_abc
-                        ideal, sigma = group_params[key_abc]
-                        idx_a_use, idx_c_use = idx_a, idx_c
-                        a_name_use, c_name_use = a_name, c_name
-                    elif key_cba in group_params:
-                        angle_key = key_cba
-                        ideal, sigma = group_params[key_cba]
-                        # Swap A/C to match the parameter key order
-                        idx_a_use, idx_c_use = idx_c, idx_a
-                        a_name_use, c_name_use = c_name, a_name
-                    else:
-                        # This particular A-B-C triplet is not parameterized
-                        continue
+                # Join bonds_ab and bonds_bc on idx_b
+                # We can use pd.merge for a clean join
+                df_ab = pd.DataFrame(bonds_ab, columns=["idx_a", "idx_b"])
+                df_bc = pd.DataFrame(bonds_bc, columns=["idx_b", "idx_c"])
 
-                    # Compute angle at B for A-B-C
-                    A = coords[idx_a_use]
-                    B = coords[idx_b]
-                    C = coords[idx_c_use]
+                merged = pd.merge(df_ab, df_bc, on="idx_b")
+                if merged.empty:
+                    continue
 
-                    v1 = A - B
-                    v2 = C - B
-                    norm_v1 = np.linalg.norm(v1)
-                    norm_v2 = np.linalg.norm(v2)
+                # Filter A != C
+                merged = merged[merged["idx_a"] != merged["idx_c"]]
+                if merged.empty:
+                    continue
 
-                    eps = 1e-8
-                    if norm_v1 <= eps or norm_v2 <= eps:
-                        continue
+                ia = merged["idx_a"].to_numpy()
+                ib = merged["idx_b"].to_numpy()
+                ic = merged["idx_c"].to_numpy()
 
-                    cos_theta = np.dot(v1, v2) / (norm_v1 * norm_v2)
-                    cos_theta = np.clip(cos_theta, -1.0, 1.0)
-                    angle_deg = float(np.degrees(np.arccos(cos_theta)))
+                # Filter: At least two distinct residues among A, B, C
+                # (chain_id, res_id) comparison
+                res_key_a = np.stack([chain_ids[ia], res_ids[ia]], axis=1)
+                res_key_b = np.stack([chain_ids[ib], res_ids[ib]], axis=1)
+                res_key_c = np.stack([chain_ids[ic], res_ids[ic]], axis=1)
 
-                    z = (angle_deg - ideal) / sigma
-                    if np.abs(z) <= z_thresh:
-                        continue
+                # Count distinct residues in each triplet
+                # A simple way: (A != B) | (B != C) | (A != C) is not enough, we need at least 2 distinct
+                # But since they are bonded, if they are inter-residue, they must have at least 2 distinct.
+                # Original logic: len(set(res_keys)) < 2 means intra-residue.
+                is_intra = np.all(res_key_a == res_key_b, axis=1) & np.all(
+                    res_key_b == res_key_c, axis=1
+                )
 
-                    bad_records.append(
+                ia, ib, ic = ia[~is_intra], ib[~is_intra], ic[~is_intra]
+                if ia.size == 0:
+                    continue
+
+                # Compute angles
+                v1 = coords[ia] - coords[ib]
+                v2 = coords[ic] - coords[ib]
+
+                norm1 = np.linalg.norm(v1, axis=1)
+                norm2 = np.linalg.norm(v2, axis=1)
+
+                mask_nonzero = (norm1 > 1e-8) & (norm2 > 1e-8)
+                if not np.any(mask_nonzero):
+                    continue
+
+                ia, ib, ic = ia[mask_nonzero], ib[mask_nonzero], ic[mask_nonzero]
+                v1, v2 = v1[mask_nonzero], v2[mask_nonzero]
+                norm1, norm2 = norm1[mask_nonzero], norm2[mask_nonzero]
+
+                cos_theta = np.einsum("ij,ij->i", v1, v2) / (norm1 * norm2)
+                cos_theta = np.clip(cos_theta, -1.0, 1.0)
+                angles_deg = np.degrees(np.arccos(cos_theta))
+
+                z_scores = (angles_deg - ideal) / sigma
+                bad_mask = np.abs(z_scores) > z_thresh
+                if not np.any(bad_mask):
+                    continue
+
+                ia_bad, ib_bad, ic_bad = ia[bad_mask], ib[bad_mask], ic[bad_mask]
+
+                bad_dfs.append(
+                    pd.DataFrame(
                         {
-                            "group": np.array([group_b], dtype=object),
-                            "angle_key": np.array([angle_key], dtype=object),
-                            "idx_a": np.array([idx_a_use], dtype=int),
-                            "idx_b": np.array([idx_b], dtype=int),
-                            "idx_c": np.array([idx_c_use], dtype=int),
-                            "res_name_a": np.array(
-                                [res_name_arr[idx_a_use]],
-                                dtype=object,
-                            ),
-                            "res_name_b": np.array(
-                                [res_name_arr[idx_b]],
-                                dtype=object,
-                            ),
-                            "res_name_c": np.array(
-                                [res_name_arr[idx_c_use]],
-                                dtype=object,
-                            ),
-                            "chain_id_a": np.array(
-                                [chain_id_arr[idx_a_use]],
-                                dtype=object,
-                            ),
-                            "chain_id_b": np.array(
-                                [chain_id_arr[idx_b]],
-                                dtype=object,
-                            ),
-                            "chain_id_c": np.array(
-                                [chain_id_arr[idx_c_use]],
-                                dtype=object,
-                            ),
-                            "res_id_a": np.array(
-                                [res_id_arr[idx_a_use]],
-                                dtype=int,
-                            ),
-                            "res_id_b": np.array([res_id_arr[idx_b]], dtype=int),
-                            "res_id_c": np.array(
-                                [res_id_arr[idx_c_use]],
-                                dtype=int,
-                            ),
-                            "atom_name_a": np.array(
-                                [a_name_use],
-                                dtype=object,
-                            ),
-                            "atom_name_b": np.array(
-                                [b_name],
-                                dtype=object,
-                            ),
-                            "atom_name_c": np.array(
-                                [c_name_use],
-                                dtype=object,
-                            ),
-                            "ideal": np.array([ideal], dtype=float),
-                            "sigma": np.array([sigma], dtype=float),
-                            "angle": np.array([angle_deg], dtype=float),
-                            "z_score": np.array([z], dtype=float),
+                            "group": group,
+                            "angle_key": angle_key,
+                            "idx_a": ia_bad,
+                            "idx_b": ib_bad,
+                            "idx_c": ic_bad,
+                            "res_name_a": res_names[ia_bad],
+                            "res_name_b": res_names[ib_bad],
+                            "res_name_c": res_names[ic_bad],
+                            "chain_id_a": chain_ids[ia_bad],
+                            "chain_id_b": chain_ids[ib_bad],
+                            "chain_id_c": chain_ids[ic_bad],
+                            "res_id_a": res_ids[ia_bad],
+                            "res_id_b": res_ids[ib_bad],
+                            "res_id_c": res_ids[ic_bad],
+                            "atom_name_a": atom_names[ia_bad],
+                            "atom_name_b": atom_names[ib_bad],
+                            "atom_name_c": atom_names[ic_bad],
+                            "ideal": ideal,
+                            "sigma": sigma,
+                            "angle": angles_deg[bad_mask],
+                            "z_score": z_scores[bad_mask],
                         }
                     )
+                )
 
-        if not bad_records:
+        if not bad_dfs:
             return pd.DataFrame()
 
-        out: dict[str, np.ndarray] = {}
-        for key in bad_records[0].keys():
-            out[key] = np.concatenate([r[key] for r in bad_records])
-
-        return pd.DataFrame(out)
+        return pd.concat(bad_dfs, ignore_index=True)
 
     def find_bad_intra_res_angles(
         self,
@@ -965,13 +748,11 @@ class StereoChemValidator:
                 considered an outlier. Defaults to ``12.0``.
 
         Returns:
-            dict[str, np.ndarray]: A dictionary of NumPy arrays
-            describing only the angles that exceed the z-score
-            threshold. If no out-of-range angles are found, an empty
-            dictionary is returned.
+            pandas.DataFrame: A table describing only the angles that exceed the
+            z-score threshold. If no out-of-range angles are found, an empty
+            DataFrame is returned.
 
-            The dictionary contains the following keys (each mapped to a
-            1D array of the same length):
+            The DataFrame contains the following columns:
 
             * ``"group"``        - parameter group name (e.g. ``"ALA"``,
               ``"GLN"``).
@@ -1002,13 +783,12 @@ class StereoChemValidator:
         if angle_data is None:
             angle_data = ANGLE_DATA
 
-        atom_array = self.atom_array
         res_groups = self.res_groups
 
-        atom_name_arr = np.asarray(atom_array.atom_name).astype(str)
-        chain_id_arr = np.asarray(atom_array.chain_id).astype(str)
-        res_id_arr = np.asarray(atom_array.res_id)
-        coords = atom_array.coord
+        atom_name_arr = self._atom_name
+        chain_id_arr = self._uni_chain_id
+        res_id_arr = self._res_id
+        coords = self.atom_array.coord
 
         bad_records: list[dict[str, np.ndarray]] = []
 
@@ -1191,57 +971,7 @@ class StereoChemValidator:
     ) -> pd.DataFrame:
         """
         Identify steric clashes based on van der Waals radii.
-
-        This method finds atom pairs that are closer than an allowed contact
-        distance derived from their van der Waals radii. The search is restricted
-        to atoms within a given spatial cutoff using a KD-tree, and excludes
-        directly bonded atom pairs. The user can either specify a global scaling
-        factor for the van der Waals contact distance or a fixed tolerance value
-        to subtract from the sum of radii.
-
-        Exactly one of ``vdw_scale_factor`` or ``tolerance`` must be provided.
-
-        Args:
-            query_mask (Sequence[bool], optional):
-                Boolean mask over all atoms in ``self.atom_array`` specifying the
-                subset of atoms to be treated as query atoms. Clashes are reported
-                between these query atoms and all atoms in the structure
-                (including other query atoms). If ``None``, all atoms are used as
-                query atoms.
-            vdw_scale_factor (float, optional):
-                Global scaling factor applied to the sum of van der Waals radii to
-                define the allowed contact distance:
-                ``contact_limit = vdw_scale_factor * (r1 + r2)``.
-                Must be ``None`` if ``tolerance`` is provided.
-            tolerance (float, optional):
-                Subtractive tolerance applied to the sum of van der Waals radii:
-                ``contact_limit = (r1 + r2) - tolerance``. Distances smaller than
-                this limit are reported as clashes. Must be ``None`` if
-                ``vdw_scale_factor`` is provided. Defaults to ``1.5``.
-            disulfide_clash_tolerance (float, optional):
-                The respective tolerance for two atoms can potentially build a disulfide bond.
-                Defaults to ``1.0``.
-            cutoff (float, optional):
-                Maximum distance (in Å) for the KD-tree neighbor search. Atom pairs
-                farther apart than this value are ignored. Defaults to ``3.0``.
-
-        Returns:
-            pandas.DataFrame:
-                A table of detected steric clashes. Each row corresponds to one
-                clashing atom pair and contains:
-
-                * ``idx1``, ``idx2``: Atom indices in ``self.atom_array``.
-                * ``res_name1``, ``chain_id1``, ``res_id1``: Residue info of atom 1.
-                * ``res_name2``, ``chain_id2``, ``res_id2``: Residue info of atom 2.
-                * ``element1``, ``element2``: Chemical elements of the two atoms.
-                * ``distance``: Observed inter-atomic distance (Å).
-                * ``contact_limit``: Allowed contact distance for this pair (Å).
-                * ``overlap``: ``contact_limit - distance``; positive values indicate
-                the magnitude of the steric overlap.
-
-                If no clashes are found, an empty ``DataFrame`` is returned.
         """
-
         atom_array = self.atom_array
         n_atoms = len(atom_array)
 
@@ -1254,11 +984,6 @@ class StereoChemValidator:
             query_mask = np.ones(n_atoms, dtype=bool)
         else:
             query_mask = np.asarray(query_mask, dtype=bool)
-            if query_mask.shape[0] != n_atoms:
-                raise ValueError(
-                    f"query_mask length {query_mask.shape[0]} "
-                    f"does not match number of atoms {n_atoms}"
-                )
 
         bonds = atom_array.bonds
         if self.ref_struct is not None:
@@ -1266,103 +991,98 @@ class StereoChemValidator:
             assert len(self.ref_struct.atom_array) == n_atoms
             bonds += self.ref_struct.atom_array.bonds
 
-        if not np.any(query_mask):
-            # no query atoms
-            return pd.DataFrame()
-
-        query_idx_in_ref = np.where(query_mask)[0]
-
         coords = atom_array.coord
-        query_coords = coords[query_mask]
-
-        res_name_arr = atom_array.res_name
-        chain_id_arr = self.struct.uni_chain_id
-        res_id_arr = atom_array.res_id
-        element_arr = atom_array.element
-        atom_name_arr = atom_array.atom_name
-
-        vdw_radii = np.array(
-            [vdw_radius_single(e) for e in atom_array.element],
-            dtype=object,
-        )
-        query_vdw_radii = vdw_radii[query_mask]
-
-        is_cys_sg = (res_name_arr == "CYS") & (atom_name_arr == "SG")
-
         tree = KDTree(coords)
 
-        idx1_list: list[int] = []
-        idx2_list: list[int] = []
-        dist_list: list[float] = []
-        limit_list: list[float] = []
-
-        for local_q_idx, nb_indices in enumerate(
-            tree.query_ball_point(query_coords, r=cutoff)
-        ):
-            ref_q_idx = query_idx_in_ref[local_q_idx]
-            q_vdw = query_vdw_radii[local_q_idx]
-            if q_vdw is None:
-                q_vdw = vdw_radius_single("C")
-
-            q_coord = query_coords[local_q_idx]
-
-            bonded_indices, _bond_types = bonds.get_bonds(ref_q_idx)
-            bonded_set = set(bonded_indices)
-
-            for nb_idx in nb_indices:
-                if nb_idx == ref_q_idx:
-                    continue
-                if nb_idx in bonded_set:
-                    continue
-                if query_mask[nb_idx] and ref_q_idx > nb_idx:
-                    continue
-
-                nb_vdw = vdw_radii[nb_idx]
-                if nb_vdw is None:
-                    nb_vdw = vdw_radius_single("C")
-
-                dist = np.linalg.norm(q_coord - coords[nb_idx])
-
-                if tolerance is None:
-                    contact_limit = vdw_scale_factor * (q_vdw + nb_vdw)
-                else:
-                    if is_cys_sg[ref_q_idx] and is_cys_sg[nb_idx]:
-                        contact_limit = (q_vdw + nb_vdw) - disulfide_clash_tolerance
-                    else:
-                        contact_limit = (q_vdw + nb_vdw) - tolerance
-
-                if dist < contact_limit:
-                    idx1_list.append(ref_q_idx)
-                    idx2_list.append(nb_idx)
-                    dist_list.append(dist)
-                    limit_list.append(contact_limit)
-
-        if not idx1_list:
+        # 1. Get all candidate pairs within cutoff (idx1 < idx2)
+        pairs = tree.query_pairs(cutoff, output_type="ndarray")
+        if pairs.size == 0:
             return pd.DataFrame()
 
-        idx1 = np.asarray(idx1_list, dtype=int)
-        idx2 = np.asarray(idx2_list, dtype=int)
-        distance = np.asarray(dist_list, dtype=float)
-        contact_limit = np.asarray(limit_list, dtype=float)
-        overlap = contact_limit - distance
+        idx1 = pairs[:, 0]
+        idx2 = pairs[:, 1]
+
+        # 2. Filter by query_mask: at least one atom must be in query_mask
+        # Note: In the original code, it seems it checks query atoms against all atoms.
+        # But if it's an intra-structure clash, we only need to check pairs where
+        # (idx1 in query) OR (idx2 in query).
+        q_filter = query_mask[idx1] | query_mask[idx2]
+        idx1, idx2 = idx1[q_filter], idx2[q_filter]
+        if idx1.size == 0:
+            return pd.DataFrame()
+
+        # 3. Filter bonded atoms
+        bond_array = bonds.as_array()[:, :2]
+        # Hash bonds for fast filtering: idx1 * n_atoms + idx2 (enforce idx1 < idx2)
+        b_idx1 = np.minimum(bond_array[:, 0], bond_array[:, 1])
+        b_idx2 = np.maximum(bond_array[:, 0], bond_array[:, 1])
+        bond_hashes = np.sort(b_idx1.astype(np.int64) * n_atoms + b_idx2)
+
+        pair_hashes = idx1.astype(np.int64) * n_atoms + idx2
+        is_bonded = np.isin(pair_hashes, bond_hashes)
+
+        idx1, idx2 = idx1[~is_bonded], idx2[~is_bonded]
+        if idx1.size == 0:
+            return pd.DataFrame()
+
+        # 4. Compute distances
+        distances = np.linalg.norm(coords[idx1] - coords[idx2], axis=1)
+
+        # 5. Compute contact limits
+        # Pre-get VDW radii
+        elements = atom_array.element
+        unique_elements = np.unique(elements)
+        vdw_map = {
+            e: vdw_radius_single(e) or vdw_radius_single("C") for e in unique_elements
+        }
+        vdw_radii = np.array([vdw_map[e] for e in elements])
+
+        r1 = vdw_radii[idx1]
+        r2 = vdw_radii[idx2]
+
+        if vdw_scale_factor is not None:
+            contact_limits = vdw_scale_factor * (r1 + r2)
+        else:
+            # Special handling for CYS SG
+            contact_limits = (r1 + r2) - tolerance
+
+            # Identify CYS SG pairs
+            res_names = self._res_name
+            atom_names = self._atom_name
+            is_cys_sg = (res_names == "CYS") & (atom_names == "SG")
+            cys_sg_pair = is_cys_sg[idx1] & is_cys_sg[idx2]
+
+            if np.any(cys_sg_pair):
+                contact_limits[cys_sg_pair] = (
+                    r1[cys_sg_pair] + r2[cys_sg_pair]
+                ) - disulfide_clash_tolerance
+
+        # 6. Final clash filter
+        clash_mask = distances < contact_limits
+        if not np.any(clash_mask):
+            return pd.DataFrame()
+
+        idx1, idx2 = idx1[clash_mask], idx2[clash_mask]
+        dist_clash = distances[clash_mask]
+        limit_clash = contact_limits[clash_mask]
 
         out_df = pd.DataFrame(
             {
                 "idx1": idx1,
                 "idx2": idx2,
-                "res_name1": res_name_arr[idx1],
-                "chain_id1": chain_id_arr[idx1],
-                "res_id1": res_id_arr[idx1],
-                "res_name2": res_name_arr[idx2],
-                "chain_id2": chain_id_arr[idx2],
-                "res_id2": res_id_arr[idx2],
-                "atom_name1": atom_name_arr[idx1],
-                "atom_name2": atom_name_arr[idx2],
-                "element1": element_arr[idx1],
-                "element2": element_arr[idx2],
-                "distance": distance,
-                "contact_limit": contact_limit,
-                "overlap": overlap,
+                "res_name1": res_names[idx1],
+                "chain_id1": self._uni_chain_id[idx1],
+                "res_id1": self._res_id[idx1],
+                "res_name2": res_names[idx2],
+                "chain_id2": self._uni_chain_id[idx2],
+                "res_id2": self._res_id[idx2],
+                "atom_name1": atom_names[idx1],
+                "atom_name2": atom_names[idx2],
+                "element1": elements[idx1],
+                "element2": elements[idx2],
+                "distance": dist_clash,
+                "contact_limit": limit_clash,
+                "overlap": limit_clash - dist_clash,
             }
         )
         return out_df
@@ -1413,24 +1133,7 @@ class StereoChemValidator:
     ) -> np.ndarray:
         """
         Compute a per-atom validity mask based on stereochemical violations.
-
-        Atoms involved in clashes, bad bonds, or bad angles (as detected by the
-        corresponding validators) trigger residue-level invalidation with the
-        following rules:
-
-        - If any backbone atom (N, CA, C, O) is involved in an issue,
-            the entire residue is marked as invalid.
-        - Otherwise, if any sidechain atom is involved, only the sidechain
-            atoms of that residue are marked as invalid.
-
-        Args:
-            clash_tolerance: Distance tolerance used in clash detection.
-            disulfide_clash_tolerance: Distance tolerance used in disulfide clash detection.
-            z_thresh: Z-score threshold for bond and angle outliers.
-
-        Returns:
-            A boolean array of shape (N_atoms,) where True indicates that the
-            atom is valid.
+        Optimized version using vectorized grouping.
         """
         # Collect all violations
         clash_df, bad_bond_df, bad_angle_df = self.find_all_violations(
@@ -1440,12 +1143,26 @@ class StereoChemValidator:
         )
 
         n_atoms = len(self.atom_array)
+        issue_mask = np.zeros(n_atoms, dtype=bool)
+
+        # Fill issue_mask from DataFrames
+        for df, keys in [
+            (clash_df, ["idx1", "idx2"]),
+            (bad_bond_df, ["idx1", "idx2"]),
+            (bad_angle_df, ["idx_a", "idx_b", "idx_c"]),
+        ]:
+            if not df.empty:
+                for k in keys:
+                    issue_mask[df[k].to_numpy(dtype=int)] = True
+
+        valid_atom_mask = ~issue_mask
+        if not issue_mask.any():
+            return valid_atom_mask
 
         # Per-atom basic info
-        atom_array = self.atom_array
-        all_res_ids = atom_array.res_id
-        all_atom_names = atom_array.atom_name
-        all_chain_ids = self.struct.uni_chain_id
+        all_res_ids = self._res_id
+        all_atom_names = self._atom_name
+        all_chain_ids = self._uni_chain_id
 
         # Determine which chains are protein vs nucleotide chains
         entity_id_to_chain_ids = self.struct.get_entity_id_to_chain_ids()
@@ -1457,6 +1174,8 @@ class StereoChemValidator:
             elif v in {DNA, RNA}:
                 nuc_chains.extend(entity_id_to_chain_ids[k])
 
+        polymer_chain_set = set(protein_chains + nuc_chains)
+
         # Backbone / sidechain classification at atom level
         all_is_bb = self._get_is_backbone_atoms_mask(
             protein_chains=protein_chains,
@@ -1466,68 +1185,41 @@ class StereoChemValidator:
         )
         all_is_side_chain = ~all_is_bb
 
-        issue_mask = np.zeros(n_atoms, dtype=bool)
-        if not clash_df.empty:
-            clash_idx = np.concatenate(
-                [
-                    clash_df["idx1"].to_numpy(dtype=int),
-                    clash_df["idx2"].to_numpy(dtype=int),
-                ]
-            )
-            issue_mask[clash_idx] = True
+        # Map each atom to a unique residue index
+        combined_res_keys = np.stack([all_chain_ids, all_res_ids], axis=1)
+        _, res_indices = np.unique(combined_res_keys, axis=0, return_inverse=True)
+        n_residues = res_indices.max() + 1
 
-        if not bad_bond_df.empty:
-            bond_idx = np.concatenate(
-                [
-                    bad_bond_df["idx1"].to_numpy(dtype=int),
-                    bad_bond_df["idx2"].to_numpy(dtype=int),
-                ]
-            )
-            issue_mask[bond_idx] = True
+        # Identify residues with issues
+        res_has_bb_issue = np.zeros(n_residues, dtype=bool)
+        res_has_sc_issue = np.zeros(n_residues, dtype=bool)
 
-        if not bad_angle_df.empty:
-            angle_idx = np.concatenate(
-                [
-                    bad_angle_df["idx_a"].to_numpy(dtype=int),
-                    bad_angle_df["idx_b"].to_numpy(dtype=int),
-                    bad_angle_df["idx_c"].to_numpy(dtype=int),
-                ]
-            )
-            issue_mask[angle_idx] = True
+        res_has_bb_issue[res_indices[issue_mask & all_is_bb]] = True
+        res_has_sc_issue[res_indices[issue_mask & all_is_side_chain]] = True
 
-        valid_atom_mask = ~issue_mask
-        if not issue_mask.any():
-            # No violations at all -> keep everything
-            return valid_atom_mask
+        # Identify which residues are polymer
+        # We can do this by checking the first atom of each residue
+        # (Since all atoms of a residue belong to the same chain)
+        first_atom_idx = np.unique(res_indices, return_index=True)[1]
+        res_is_polymer = np.isin(all_chain_ids[first_atom_idx], list(polymer_chain_set))
 
-        # Iterate only over residues that have issues
-        issue_idx = np.where(issue_mask)[0]
-        issue_chain_ids = all_chain_ids[issue_idx]
-        issue_res_ids = all_res_ids[issue_idx].astype(int)
+        # Invalidation rules:
+        # 1. If backbone issue -> invalidate entire residue
+        res_to_invalidate_entirely = res_is_polymer & res_has_bb_issue
+        # 2. If only sidechain issue -> invalidate only sidechain
+        res_to_invalidate_sidechain = (
+            res_is_polymer & res_has_sc_issue & (~res_has_bb_issue)
+        )
 
-        issue_pairs = zip(issue_chain_ids, issue_res_ids)
-        polymer_chain_ids = set(protein_chains + nuc_chains)
-        for chain_id, resid in set(issue_pairs):
+        # Map back to atoms
+        invalidate_mask = res_to_invalidate_entirely[res_indices] | (
+            res_to_invalidate_sidechain[res_indices] & all_is_side_chain
+        )
 
-            if chain_id not in polymer_chain_ids:
-                # non-polymer -> drop atoms that have issues
-                # already dropped -> skip
-                continue
+        # For non-polymer residues, we already have issue_mask[atom] = True if it has an issue.
+        # So we just combine them.
+        final_valid_mask = ~(
+            invalidate_mask | (issue_mask & (~res_is_polymer[res_indices]))
+        )
 
-            res_mask = (all_chain_ids == chain_id) & (all_res_ids == resid)
-
-            res_bb_mask = res_mask & all_is_bb
-            res_sc_mask = res_mask & all_is_side_chain
-
-            has_bb_issue = (issue_mask & res_bb_mask).any()
-            has_sc_issue = (issue_mask & res_sc_mask).any()
-
-            # Backbone issues -> drop entire residue
-            if has_bb_issue:
-                valid_atom_mask[res_mask] = False
-                continue
-
-            # Only sidechain issues -> drop sidechain atoms
-            if has_sc_issue:
-                valid_atom_mask[res_sc_mask] = False
-        return valid_atom_mask
+        return final_valid_mask

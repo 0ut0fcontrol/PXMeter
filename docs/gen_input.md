@@ -19,10 +19,10 @@ pxm gen-input \
 
 Supported input types:
 
-* `cif` – mmCIF structure
-* `af3` – AlphaFold3 JSON
-* `protenix` – Protenix JSON
-* `boltz` – Boltz YAML
+* `cif` - mmCIF structure
+* `af3` - AlphaFold3 JSON
+* `protenix` - Protenix JSON
+* `boltz` - Boltz YAML
 
 Supported output types:
 

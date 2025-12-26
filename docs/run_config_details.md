@@ -6,11 +6,12 @@ each field controls at runtime and when you may want to change it.
 
 ## Table of Contents
 
-- [1. Mapping configuration (`mapping`)](#1-mapping-configuration-mapping)
-- [2. Metric configuration (`metric`)](#2-metric-configuration-metric)
-- [3. LDDT-specific configuration (`metric.lddt`)](#3-lddt-specific-configuration-metriclddt)
-- [4. Clash-specific configuration (`metric.clashes`)](#4-clash-specific-configuration-metricclashes)
-- [5. How to override RUN_CONFIG](#5-how-to-override-run_config)
+- [1. How to override RUN_CONFIG](#1-how-to-override-run-config)
+- [2. Mapping configuration (`mapping`)](#2-mapping-configuration-mapping)
+- [3. Metric configuration (`metric`)](#3-metric-configuration-metric)
+- [4. LDDT-specific configuration (`metric.lddt`)](#4-lddt-specific-configuration-metriclddt)
+- [5. Clash-specific configuration (`metric.clashes`)](#5-clash-specific-configuration-metricclashes)
+- [6. DockQ-specific configuration (`metric.dockq`)](#6-dockq-specific-configuration-metricdockq)
 
 The default configuration looks like:
 
@@ -37,6 +38,9 @@ RUN_CONFIG = ConfigDict(
                 "stereochecks": False,
                 "calc_backbone_lddt": True,
             },
+            "dockq": {
+                "exclude_hetatms": True,
+            },
             "clashes": {
                 "vdw_scale_factor": 0.5,
             },
@@ -51,12 +55,62 @@ You can modify any of these fields either from Python by updating
 
 ---
 
-## 1. Mapping configuration (`mapping`)
+## 1. How to override RUN_CONFIG
+
+You can adjust any of the above options from either the command line or
+Python.
+
+### 1.1 Command-line overrides (`-C`)
+
+The PXMeter CLI accepts overrides via the `-C` flag:
+
+```bash
+pxm -r ref.cif -m model.cif -o result.json \
+  -C mapping.res_id_alignments=false \
+  -C metric.lddt.eps=1e-5 \
+  -C metric.clashes.vdw_scale_factor=0.6
+```
+
+Each `-C` argument has the form:
+
+```text
+key1.key2.key3=VALUE
+```
+
+The key path must correspond to an existing hierarchy in `RUN_CONFIG`.
+Values are automatically cast to the type of the existing value
+(bool/int/float/string).
+
+### 1.2 Python API
+
+From Python, you can modify `RUN_CONFIG` directly before calling
+`evaluate`:
+
+```python
+from pxmeter.configs.run_config import RUN_CONFIG
+from pxmeter.eval import evaluate
+
+RUN_CONFIG.mapping.res_id_alignments = False
+RUN_CONFIG.metric.lddt.nucleotide_threshold = 25.0
+
+result = evaluate(
+    ref_cif="ref.cif",
+    model_cif="model.cif",
+    run_config=RUN_CONFIG,
+)
+```
+
+This approach is especially useful in batch evaluation scripts, where a
+single customised `RUN_CONFIG` can be reused for many evaluations.
+
+---
+
+## 2. Mapping configuration (`mapping`)
 
 The `mapping` section controls how PXMeter builds the correspondence between
 reference and model structures: entities, chains, residues, and atoms.
 
-### 1.1 `mapping.mapping_polymer` (bool)
+### 2.1 `mapping.mapping_polymer` (bool)
 
 **Default:** `True`
 
@@ -77,7 +131,7 @@ DNA/RNA, etc.) between reference and model structures.
   polymer entities are already pre-mapped and you are only interested in
   non-polymer behaviour.
 
-### 1.2 `mapping.mapping_ligand` (bool)
+### 2.2 `mapping.mapping_ligand` (bool)
 
 **Default:** `True`
 
@@ -102,7 +156,7 @@ such as small molecules, ions, sugars) between reference and model.
 - Keep enabled for most real-world protein–ligand or protein–cofactor
   evaluations.
 
-### 1.3 `mapping.res_id_alignments` (bool)
+### 2.3 `mapping.res_id_alignments` (bool)
 
 **Default:** `True`
 
@@ -129,7 +183,7 @@ corresponding chains.
   numbering or truncations**, e.g. de novo predictions, models with
   missing terminal segments, or models built from alternative templates.
 
-### 1.4 `mapping.enumerate_all_anchors` (bool)
+### 2.4 `mapping.enumerate_all_anchors` (bool)
 
 **Default:** `True`
 
@@ -161,7 +215,7 @@ both and using it to initialise the rigid-body transform.
 - Consider `False` only for very large complexes where you need to
   reduce runtime and are confident about the chain mapping.
 
-### 1.5 `mapping.auto_fix_model_entities` (bool)
+### 2.5 `mapping.auto_fix_model_entities` (bool)
 
 **Default:** `True`
 
@@ -189,16 +243,16 @@ annotations** when they are inconsistent or suboptimal for mapping.
 
 ---
 
-## 2. Metric configuration (`metric`)
+## 3. Metric configuration (`metric`)
 
 The `metric` section controls which metrics PXMeter computes and how they
 are configured.
 
-### 2.1 Top-level metric switches
+### 3.1 Top-level metric switches
 
 These booleans enable or disable whole metric families.
 
-#### 2.1.1 `metric.calc_clashes` (bool)
+#### 3.1.1 `metric.calc_clashes` (bool)
 
 **Default:** `True`
 
@@ -212,7 +266,7 @@ number of atoms in the model involved in severe van der Waals overlaps.
     Waals radii (see `metric.clashes.vdw_scale_factor`).
 - If `False`, clash statistics are not computed or reported.
 
-#### 2.1.2 `metric.calc_lddt` (bool)
+#### 3.1.2 `metric.calc_lddt` (bool)
 
 **Default:** `True`
 
@@ -225,7 +279,7 @@ Enables computation of **LDDT** metrics:
 If `False`, all LDDT calculations are skipped, regardless of the
 settings in `metric.lddt`.
 
-#### 2.1.3 `metric.calc_dockq` (bool)
+#### 3.1.3 `metric.calc_dockq` (bool)
 
 **Default:** `True`
 
@@ -244,7 +298,7 @@ Typical reasons to disable:
 - You are running in a constrained environment where external tools
   cannot be executed.
 
-#### 2.1.4 `metric.calc_rmsd` (bool)
+#### 3.1.4 `metric.calc_rmsd` (bool)
 
 **Default:** `True`
 
@@ -257,7 +311,7 @@ RMSD around ligands when `interested_lig_label_asym_id` is provided.
   - reports ligand and pocket RMSD values.
 - When `False`, RMSD calculations for these pockets are skipped.
 
-#### 2.1.5 `metric.calc_pb_valid` (bool)
+#### 3.1.5 `metric.calc_pb_valid` (bool)
 
 **Default:** `True`
 
@@ -282,11 +336,11 @@ Typical reasons to disable:
 
 ---
 
-## 3. LDDT-specific configuration (`metric.lddt`)
+## 4. LDDT-specific configuration (`metric.lddt`)
 
 The `metric.lddt` sub-dictionary fine-tunes how LDDT is calculated.
 
-### 3.1 `metric.lddt.eps` (float)
+### 4.1 `metric.lddt.eps` (float)
 
 **Default:** `1e-6`
 
@@ -298,7 +352,7 @@ instabilities.
 - Advanced users may tweak it when experimenting with alternative
   numerical schemes.
 
-### 3.2 `metric.lddt.nucleotide_threshold` (float)
+### 4.2 `metric.lddt.nucleotide_threshold` (float)
 
 **Default:** `30.0`
 
@@ -316,7 +370,7 @@ Typical modifications:
 - Increase only for experimental setups where very long-range contacts
   are critical.
 
-### 3.3 `metric.lddt.non_nucleotide_threshold` (float)
+### 4.3 `metric.lddt.non_nucleotide_threshold` (float)
 
 **Default:** `15.0`
 
@@ -333,7 +387,7 @@ Typical modifications:
 - Reduce to emphasise local structural quality for proteins.
 - Increase for experiments focused on long-range contacts.
 
-### 3.4 `metric.lddt.stereochecks` (bool)
+### 4.4 `metric.lddt.stereochecks` (bool)
 
 **Default:** `False`
 
@@ -354,7 +408,7 @@ Typical use cases:
   reasonable parts of the model.
 - Keep `False` for simpler, fully-inclusive scoring.
 
-### 3.5 `metric.lddt.calc_backbone_lddt` (bool)
+### 4.5 `metric.lddt.calc_backbone_lddt` (bool)
 
 **Default:** `True`
 
@@ -379,12 +433,12 @@ Typical use cases:
 
 ---
 
-## 4. Clash-specific configuration (`metric.clashes`)
+## 5. Clash-specific configuration (`metric.clashes`)
 
 The `metric.clashes` sub-dictionary adjusts the definition of a steric
 clash used in the clash metric.
 
-### 4.1 `metric.clashes.vdw_scale_factor` (float)
+### 5.1 `metric.clashes.vdw_scale_factor` (float)
 
 **Default:** `0.5`
 
@@ -414,50 +468,26 @@ Typical modifications:
 
 ---
 
-## 5. How to override RUN_CONFIG
+## 6. DockQ-specific configuration (`metric.dockq`)
 
-You can adjust any of the above options from either the command line or
-Python.
+The `metric.dockq` sub-dictionary adjusts how DockQ scores are computed.
 
-### 5.1 Command-line overrides (`-C`)
+### 6.1 `metric.dockq.exclude_hetatms` (bool)
 
-The PXMeter CLI accepts overrides via the `-C` flag:
+**Default:** `True`
 
-```bash
-pxm -r ref.cif -m model.cif -o result.json \
-  -C mapping.res_id_alignments=false \
-  -C metric.lddt.eps=1e-5 \
-  -C metric.clashes.vdw_scale_factor=0.6
-```
+Controls whether HETATM atoms (as defined in the reference mmCIF) are excluded
+before computing DockQ.
 
-Each `-C` argument has the form:
-
-```text
-key1.key2.key3=VALUE
-```
-
-The key path must correspond to an existing hierarchy in `RUN_CONFIG`.
-Values are automatically cast to the type of the existing value
-(bool/int/float/string).
-
-### 5.2 Python API
-
-From Python, you can modify `RUN_CONFIG` directly before calling
-`evaluate`:
-
-```python
-from pxmeter.configs.run_config import RUN_CONFIG
-from pxmeter.eval import evaluate
-
-RUN_CONFIG.mapping.res_id_alignments = False
-RUN_CONFIG.metric.lddt.nucleotide_threshold = 25.0
-
-result = evaluate(
-    ref_cif="ref.cif",
-    model_cif="model.cif",
-    run_config=RUN_CONFIG,
-)
-```
-
-This approach is especially useful in batch evaluation scripts, where a
-single customised `RUN_CONFIG` can be reused for many evaluations.
+- When `True` (default):
+  - PXMeter filters out all HETATM atoms from both reference and model before
+    running the DockQ alignment and scoring.
+  - This matches the "native" DockQ behavior. However, note that some non-standard
+    residues in peptides (e.g., Chain C of PDB 9CY4) are labeled as HETATM in
+    mmCIF and will be excluded, which might not be desired for peptide-protein
+    interfaces.
+- When `False`:
+  - HETATM atoms are kept during the DockQ calculation.
+  - This is useful if you want to include non-standard residues or certain
+    non-polymer components in the interface assessment (e.g., to correctly
+    evaluate interfaces involving peptides with modified residues).

@@ -111,7 +111,7 @@ def _get_aligned_residues(
     """
     Get residues that are common between ref and model based on residue ID.
     Official DockQ uses sequence alignment, but here we assume mapping is handled
-    by residue identifiers (res_id + res_name + ins_code) for simplicity.
+    by residue identifiers (res_id + res_name) for simplicity.
     """
 
     def get_res_map(struct, chain):
@@ -131,13 +131,9 @@ def _get_aligned_residues(
         res_dict = {}
         # We still need to loop to build the dictionary with RIDs
         for start, stop in zip(sel_starts, sel_stops):
-            # Include ins_code for robust mapping
-            ins_code = (
-                struct.atom_array.ins_code[start]
-                if hasattr(struct.atom_array, "ins_code")
-                else ""
+            rid = (
+                f"{struct.atom_array.res_id[start]}_{struct.atom_array.res_name[start]}"
             )
-            rid = f"{struct.atom_array.res_id[start]}_{struct.atom_array.res_name[start]}_{ins_code}"
             res_dict[rid] = (start, stop)
         return res_dict
 
@@ -402,6 +398,75 @@ def compute_dockq_for_pair(
     }
 
 
+def _filter_hetatm_atoms(
+    ref_struct: Structure,
+    model_struct: Structure,
+    ref_to_model_chain_map: dict[str, str],
+) -> tuple[Structure, Structure]:
+    """
+    Filter out HETATM atoms from both reference and model structures.
+
+    Some PDB structures label non-standard residues in protein chains as HETATM (e.g., 9CY4 and 8J8V).
+    During DockQ calculation, these HETATM residues are often excluded while ATOM residues in the same
+    chain are included. To maintain consistency with the native DockQ logic, this function filters
+    out HETATM atoms from both reference and model structures based on the reference's HETATM labels.
+
+    Args:
+        ref_struct: Reference structure.
+        model_struct: Model structure to evaluate.
+        ref_to_model_chain_map: Mapping from reference chain IDs to model chain IDs.
+
+    Returns:
+        tuple: (filtered_ref_struct, filtered_model_struct)
+    """
+    if "hetero" in ref_struct.atom_array.get_annotation_categories() and np.any(
+        ref_struct.atom_array.hetero
+    ):
+        ref_atoms = ref_struct.atom_array
+        hetero_mask = ref_atoms.hetero
+
+        # Map ref chains to model chains for key consistency
+        ref_mapped_chains = np.array(
+            [ref_to_model_chain_map.get(c, "") for c in ref_struct.uni_chain_id]
+        )
+        valid_map_mask = ref_mapped_chains != ""
+
+        # Construct keys for HETATM atoms in ref (mapped to model chains)
+        ref_keys = np.array(
+            [
+                f"{c}_{rid}_{rn}_{an}"
+                for c, rid, rn, an in zip(
+                    ref_mapped_chains,
+                    ref_atoms.res_id,
+                    ref_atoms.res_name,
+                    ref_atoms.atom_name,
+                )
+            ]
+        )
+        hetero_keys_set = set(ref_keys[hetero_mask & valid_map_mask])
+
+        # Filter ref_struct
+        ref_struct = ref_struct.select_substructure(~hetero_mask)
+
+        # Filter model_struct
+        model_atoms = model_struct.atom_array
+        model_keys = [
+            f"{c}_{rid}_{rn}_{an}"
+            for c, rid, rn, an in zip(
+                model_struct.uni_chain_id,
+                model_atoms.res_id,
+                model_atoms.res_name,
+                model_atoms.atom_name,
+            )
+        ]
+
+        # Use list comprehension with set lookup for efficient filtering
+        model_keep = np.array([k not in hetero_keys_set for k in model_keys])
+        model_struct = model_struct.select_substructure(model_keep)
+
+    return ref_struct, model_struct
+
+
 def compute_dockq(
     ref_struct: Structure,
     model_struct: Structure,
@@ -420,7 +485,14 @@ def compute_dockq(
     Returns:
         Dictionary mapping interface keys (e.g., "A:B") to their respective DockQ results.
     """
-    _, interfaces = ref_struct.get_chains_and_interfaces(interface_radius=10)
+    # Filter out HETATM based on ref_struct to maintain native DockQ consistency
+    ref_struct, model_struct = _filter_hetatm_atoms(
+        ref_struct, model_struct, ref_to_model_chain_map
+    )
+
+    _, interfaces = ref_struct.get_chains_and_interfaces(
+        interface_radius=INTERFACE_THRESHOLD
+    )
 
     dockq_result_dict = {}
     for c1, c2 in interfaces:

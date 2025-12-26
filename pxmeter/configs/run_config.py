@@ -38,6 +38,9 @@ RUN_CONFIG = ConfigDict(
                 "non_nucleotide_threshold": 15.0,
                 "stereochecks": False,
             },
+            "dockq": {
+                "exclude_hetatms": True,
+            },
             "clashes": {
                 "vdw_scale_factor": 0.5,
             },

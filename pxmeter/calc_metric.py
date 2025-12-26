@@ -523,6 +523,7 @@ class MetricResult:
                 ref_struct=ref_struct,
                 model_struct=model_struct,
                 ref_to_model_chain_map=chain_map,
+                exclude_hetatms=metric_config.dockq.exclude_hetatms,
             )
             interface_dockq_dict = cls._post_process_dockq(dockq_result_dict)
             cls._update_src_to_tar_dict(interface_dockq_dict, interface_result_dict)

@@ -472,6 +472,7 @@ def compute_dockq(
     model_struct: Structure,
     ref_to_model_chain_map: dict[str, str],
     align_atoms: bool = True,
+    exclude_hetatms: bool = True,
 ) -> dict[str, dict[str, Any]]:
     """
     Computes DockQ scores for all interfaces in a reference structure.
@@ -481,14 +482,16 @@ def compute_dockq(
         model_struct: Model structure to evaluate.
         ref_to_model_chain_map: Mapping from reference chain IDs to model chain IDs.
         align_atoms: Whether to align atoms by name within residues. Defaults to True.
+        exclude_hetatms: Whether to exclude HETATM atoms based on ref_struct. Defaults to True.
 
     Returns:
         Dictionary mapping interface keys (e.g., "A:B") to their respective DockQ results.
     """
-    # Filter out HETATM based on ref_struct to maintain native DockQ consistency
-    ref_struct, model_struct = _filter_hetatm_atoms(
-        ref_struct, model_struct, ref_to_model_chain_map
-    )
+    if exclude_hetatms:
+        # Filter out HETATM based on ref_struct to maintain native DockQ consistency
+        ref_struct, model_struct = _filter_hetatm_atoms(
+            ref_struct, model_struct, ref_to_model_chain_map
+        )
 
     _, interfaces = ref_struct.get_chains_and_interfaces(
         interface_radius=INTERFACE_THRESHOLD

@@ -16,6 +16,7 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Union
 
 import yaml
 
@@ -29,14 +30,14 @@ from pxmeter.input_builder.seq import (
 from pxmeter.utils import int_to_letters
 
 
-@dataclass(kw_only=True)
+@dataclass
 class BoltzInput:
     """
     Boltz input wrapper with sequences and covalent bonds.
     """
 
     name: str
-    sequences: tuple[PolymerChainSequence | LigandChainSequence]
+    sequences: tuple[Union[PolymerChainSequence, LigandChainSequence]]
     bonds: tuple[Bond] = tuple()
 
     @staticmethod
@@ -215,7 +216,7 @@ class BoltzInput:
         )
 
     @classmethod
-    def from_yaml_file(cls, yaml_f: Path | str) -> "BoltzInput":
+    def from_yaml_file(cls, yaml_f: Union[Path, str]) -> "BoltzInput":
         """
         Load a BoltzInput from a YAML file.
 

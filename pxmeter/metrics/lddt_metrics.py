@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Sequence
+from typing import Optional, Sequence, Union
 
 import numpy as np
 from scipy.spatial import KDTree
@@ -128,7 +128,7 @@ class LDDT:
         self,
         model_dist_sparse_lm: np.ndarray,
         ref_dist_sparse_lm: np.ndarray,
-        pair_valid_mask: np.ndarray | None = None,
+        pair_valid_mask: Optional[np.ndarray] = None,
     ) -> float:
         """
         Calculate LDDT scores from predicted and true atom pair distances.
@@ -233,7 +233,7 @@ class LDDT:
         self,
         l_index: np.ndarray,
         m_index: np.ndarray,
-        atom_mask: np.ndarray | None,
+        atom_mask: Optional[np.ndarray],
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Apply an atom-level mask to atom pair indices.
@@ -253,10 +253,10 @@ class LDDT:
 
     def run(
         self,
-        chain_1_masks: np.ndarray | None = None,
-        chain_2_masks: np.ndarray | None = None,
-        atom_mask: np.ndarray | None = None,
-    ) -> float | list[float]:
+        chain_1_masks: Optional[np.ndarray] = None,
+        chain_2_masks: Optional[np.ndarray] = None,
+        atom_mask: Optional[np.ndarray] = None,
+    ) -> Union[float, list[float]]:
         """
         Run LDDT calculation for complex / chain / interface evaluation.
         If the evaluation is for whole complex, the chain_1_mask and chain_2_mask are None.

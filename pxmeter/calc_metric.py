@@ -18,7 +18,7 @@ import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -42,8 +42,8 @@ logging.getLogger("posebusters").setLevel(logging.ERROR)
 def compute_pb_valid(
     ref_struct: Structure,
     model_struct: Structure,
-    ref_lig_label_asym_id: str | list[str],
-) -> pd.DataFrame | None:
+    ref_lig_label_asym_id: Union[str, list[str]],
+) -> Optional[pd.DataFrame]:
     """
     Compute pose-busting validation metrics for a given reference structure, model structure, and reference features.
 
@@ -190,7 +190,7 @@ class CalcLDDTMetric:
         merged_chain_2_masks = np.array(merged_chain_2_masks)
         return merged_chain_1_masks, merged_chain_2_masks
 
-    def get_complex_lddt(self, atom_mask: np.ndarray | None = None) -> float:
+    def get_complex_lddt(self, atom_mask: Optional[np.ndarray] = None) -> float:
         """
         Calculate the LDDT score for a complex.
 
@@ -216,7 +216,7 @@ class CalcLDDTMetric:
         self,
         chains: list[str],
         interfaces: list[tuple[str, str]],
-        atom_mask: np.ndarray | None = None,
+        atom_mask: Optional[np.ndarray] = None,
     ) -> list[float]:
         """
         Calculate the LDDT scores for chains and interfaces.
@@ -265,11 +265,11 @@ class MetricResult:
     interface: dict[tuple[str, str], dict[str, Any]]
 
     # [ref_chain_id: {metric: value}]
-    pb_valid: dict[str, dict[str, Any]] | None = None
+    pb_valid: Optional[dict[str, dict[str, Any]]] = None
 
-    ori_model_chain_ids: list[str] | None = None
+    ori_model_chain_ids: Optional[list[str]] = None
 
-    update_data: dict[str, Any] | None = None
+    update_data: Optional[dict[str, Any]] = None
 
     @staticmethod
     def _get_chain_info(ref_struct: Structure) -> dict[str, dict[str, str]]:
@@ -368,7 +368,7 @@ class MetricResult:
     @staticmethod
     def _post_process_dockq(
         dockq_result_dict: dict[str, Any],
-    ) -> dict[str, float | dict[str, float]]:
+    ) -> dict[str, Union[float, dict[str, float]]]:
         polymer_dockq_metrics = {"F1", "iRMSD", "LRMSD", "fnat", "nat_correct",
                                  "nat_total", "fnonnat", "nonnat_count", "model_total",
                                  "clashes", "len1", "len2", "class1", "class2", "is_het",
@@ -404,8 +404,8 @@ class MetricResult:
 
     @staticmethod
     def _post_process_pb_valid(
-        pb_valid_result_df: pd.DataFrame | None,
-    ) -> dict[str, dict[str, Any]] | None:
+        pb_valid_result_df: Optional[pd.DataFrame],
+    ) -> Optional[dict[str, dict[str, Any]]]:
         if pb_valid_result_df is None:
             return
 
@@ -439,10 +439,10 @@ class MetricResult:
         cls,
         ref_struct: Structure,
         model_struct: Structure,
-        ori_model_chain_ids: list[str] | None = None,
-        interested_lig_label_asym_id: str | list[str] | None = None,
+        ori_model_chain_ids: Optional[list[str]] = None,
+        interested_lig_label_asym_id: Optional[Union[str, list[str]]] = None,
         metric_config: ConfigDict = RUN_CONFIG.metric,
-        update_data: dict[str, Any] | None = None,
+        update_data: Optional[dict[str, Any]] = None,
     ) -> "MetricResult":
         """
         Create a MetricResult instance from given structures and features.
@@ -619,7 +619,7 @@ class MetricResult:
             json_dict["ori_model_chain_ids"] = self.ori_model_chain_ids
         return json_dict
 
-    def to_json(self, json_file: Path, update_data: dict | None = None):
+    def to_json(self, json_file: Path, update_data: Optional[dict] = None):
         """
         Convert the MetricResult instance to a JSON string.
 

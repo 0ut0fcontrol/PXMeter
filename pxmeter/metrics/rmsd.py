@@ -12,14 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Optional
+
 import numpy as np
 
 
 def align_src_to_tar(
     src_pose: np.ndarray,
     tar_pose: np.ndarray,
-    atom_mask: np.ndarray | None = None,
-    weight: np.ndarray | None = None,
+    atom_mask: Optional[np.ndarray] = None,
+    weight: Optional[np.ndarray] = None,
     allow_reflection: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -137,9 +139,9 @@ def rmsd(
 def partially_aligned_rmsd(
     src_pose: np.ndarray,
     tar_pose: np.ndarray,
-    align_mask: np.ndarray | None = None,
-    rmsd_mask: np.ndarray | None = None,
-    weight: np.ndarray | None = None,
+    align_mask: Optional[np.ndarray] = None,
+    rmsd_mask: Optional[np.ndarray] = None,
+    weight: Optional[np.ndarray] = None,
     eps: float = 0.0,
     reduce: bool = True,
     allow_reflection: bool = False,

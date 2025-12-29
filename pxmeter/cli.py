@@ -15,6 +15,7 @@
 import logging
 import sys
 from pathlib import Path
+from typing import Optional
 
 import click
 from biotite import setup_ccd
@@ -39,10 +40,10 @@ def run_eval_cif(
     model_cif: Path,
     output_json: Path,
     ref_model: int = 1,
-    ref_assembly_id: str | None = None,
+    ref_assembly_id: Optional[str] = None,
     ref_altloc: str = "first",
-    interested_lig_label_asym_id: str | None = None,
-    chain_id_to_mol_json: Path | None = None,
+    interested_lig_label_asym_id: Optional[str] = None,
+    chain_id_to_mol_json: Optional[Path] = None,
     output_mapped_cif: bool = False,
 ) -> MetricResult:
     """
@@ -147,10 +148,10 @@ def cli(
     model_cif: Path,
     output_json: Path,
     ref_model: int = 1,
-    ref_assembly_id: str | None = None,
+    ref_assembly_id: Optional[str] = None,
     ref_altloc: str = "first",
-    interested_lig_label_asym_id: str | None = None,
-    chain_id_to_mol_json: Path | None = None,
+    interested_lig_label_asym_id: Optional[str] = None,
+    chain_id_to_mol_json: Optional[Path] = None,
     output_mapped_cif: bool = False,
     config_overrides: tuple[str, ...] = (),
 ):
@@ -279,8 +280,8 @@ def gen_input_cli(
     output_type: str,
     seeds: list[int] = None,
     num_seeds: int = None,
-    assembly_id: str | None = None,
-    pdb_ids: str | None = None,
+    assembly_id: Optional[str] = None,
+    pdb_ids: Optional[str] = None,
     num_cpu: int = -1,
 ):
     """

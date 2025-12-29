@@ -14,11 +14,12 @@
 
 import json
 from pathlib import Path
+from typing import Union
 
 from rdkit import Chem
 
 
-def read_chain_id_to_mol_from_json(json_f: Path | str) -> dict[str, Chem.Mol]:
+def read_chain_id_to_mol_from_json(json_f: Union[Path, str]) -> dict[str, Chem.Mol]:
     """
     Reads a JSON file containing chain IDs and their corresponding SMILES representations,
     and returns a dictionary mapping chain IDs to RDKit Mol objects.

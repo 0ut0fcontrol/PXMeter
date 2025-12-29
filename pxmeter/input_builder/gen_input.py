@@ -17,6 +17,7 @@ import logging
 import random
 import traceback
 from pathlib import Path
+from typing import Optional
 
 from joblib import Parallel, delayed
 from tqdm import tqdm
@@ -36,7 +37,7 @@ def gen_one(
     input_type: str,
     output_type: str,
     seeds: list[int],
-    assembly_id: str | None = None,
+    assembly_id: Optional[str] = None,
 ):
     """
     Generate a single model-input file from one source file.
@@ -76,7 +77,7 @@ def gen_batch(
     input_type: str,
     output_type: str,
     seeds: list[int],
-    assembly_id: str | None = None,
+    assembly_id: Optional[str] = None,
     num_cpu: int = -1,
 ):
     """
@@ -144,9 +145,9 @@ def run_gen_input(
     output_type: str,
     seeds: list[int] = None,
     num_seeds: int = None,
-    assembly_id: str | None = None,
+    assembly_id: Optional[str] = None,
     num_cpu: int = -1,
-    pdb_ids: str | None = None,
+    pdb_ids: Optional[str] = None,
 ):
     """
     Entry point for generating model inputs from files or directories.

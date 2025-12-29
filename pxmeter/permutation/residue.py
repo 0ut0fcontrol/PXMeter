@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Optional
+
 import networkx as nx
 import numpy as np
 
@@ -69,7 +71,7 @@ class ResiduePermutation:
     @staticmethod
     def _get_branch_residue_permutations(
         struct: Structure, chain_id: str
-    ) -> np.ndarray | None:
+    ) -> Optional[np.ndarray]:
         """
         Detect branch-like connectivity within a chain using non-adjacent residue bonds and,
         if the induced residue-level graph is a single tree, return residue permutations
@@ -160,7 +162,7 @@ class ResiduePermutation:
                 perm = np.array(perm)
                 return perm
 
-    def _get_optimal_perm_ids_for_chain(self, chain_id: str) -> np.ndarray | None:
+    def _get_optimal_perm_ids_for_chain(self, chain_id: str) -> Optional[np.ndarray]:
         """
         Compute the residue-ID permutation for a branch-like chain that best aligns
         the model to the reference, measured by centroid RMSD.

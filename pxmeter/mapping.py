@@ -15,7 +15,7 @@
 import copy
 import dataclasses
 import logging
-from typing import Any, Sequence
+from typing import Any, Optional, Sequence, Union
 
 import numpy as np
 from biotite.sequence.align import Alignment
@@ -65,10 +65,10 @@ class MappingCIF:
         self,
         ref_cif: str,
         model_cif: str,
-        ref_assembly_id: str | None = None,
+        ref_assembly_id: Optional[str] = None,
         ref_altloc: str = "first",
         ref_model: int = 1,
-        model_chain_id_to_lig_mol: dict[str, Chem.Mol] | None = None,
+        model_chain_id_to_lig_mol: Optional[dict[str, Chem.Mol]] = None,
         mapping_config: ConfigDict = RUN_CONFIG.mapping,
     ):
         self.ref_cif = ref_cif
@@ -148,9 +148,9 @@ class MappingCIF:
 
     def _ref_parser(
         self,
-        ref_model: int | None = 1,
-        ref_altloc: str | None = "first",
-        ref_assembly_id: int | None = None,
+        ref_model: Optional[int] = 1,
+        ref_altloc: Optional[str] = "first",
+        ref_assembly_id: Optional[int] = None,
     ) -> Structure:
         """
         Parses the reference structure from an mmCIF file and cleans it.
@@ -308,7 +308,7 @@ class MappingCIF:
         return model_to_ref_poly_entity_id, entity_alignments_dict
 
     @staticmethod
-    def _get_entity_ccd_seq(struct: Structure, entity_ids: list | tuple):
+    def _get_entity_ccd_seq(struct: Structure, entity_ids: Union[list, tuple]):
         """
         Generate a mapping of entity IDs to their corresponding CCD sequences.
 
@@ -813,7 +813,7 @@ class MappingCIF:
         struct: Structure,
         entity_id: str,
         unique_atom_id: np.ndarray,
-        inter_entity_unique_atom_id: set | list,
+        inter_entity_unique_atom_id: Union[set, list],
     ) -> list[np.ndarray]:
         """
         Retrieve the indices of atoms in a structure that belong to
@@ -999,11 +999,11 @@ class MappingResult:
         cls,
         ref_cif: str,
         model_cif: str,
-        ref_assembly_id: str | None = None,
+        ref_assembly_id: Optional[str] = None,
         ref_altloc: str = "first",
         ref_model: int = 1,
-        model_chain_id_to_lig_mol: dict[str, Chem.Mol] | None = None,
-        chain_mapping: dict[str, str] | None = None,
+        model_chain_id_to_lig_mol: Optional[dict[str, Chem.Mol]] = None,
+        chain_mapping: Optional[dict[str, str]] = None,
         mapping_config: ConfigDict = RUN_CONFIG.mapping,
     ) -> "MappingResult":
         """

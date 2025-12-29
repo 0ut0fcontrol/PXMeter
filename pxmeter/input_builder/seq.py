@@ -15,6 +15,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional, Union
 
 import numpy as np
 from biotite.interface.rdkit import to_mol
@@ -42,7 +43,7 @@ class BaseChainSequence:
     def get_num_tokens(self) -> int: ...
 
 
-@dataclass(kw_only=True)
+@dataclass
 class PolymerChainSequence(BaseChainSequence):
     """
     Sequence descriptor for a single polymer chain.
@@ -57,8 +58,8 @@ class PolymerChainSequence(BaseChainSequence):
         entity_type (str): Polymer type, expected to be one of `POLYMER`.
         modifications (tuple[tuple[int, str]]): Unique set of (res_id, res_name) for
             non-standard residues observed in the structure along this chain.
-        ori_entity_id (str | None): Entity ID from the source structure.
-        ori_chain_id (str | None): Chain identifier from the source structure.
+        ori_entity_id (Optional[str]): Entity ID from the source structure.
+        ori_chain_id (Optional[str]): Chain identifier from the source structure.
 
     Equality/Hashing:
         Two instances compare equal if `sequence`, `entity_type`, and the *set* of
@@ -69,8 +70,8 @@ class PolymerChainSequence(BaseChainSequence):
     sequence: str
     entity_type: str
     modifications: tuple[tuple[int, str]] = tuple()
-    ori_entity_id: str | None = None
-    ori_chain_id: str | None = None
+    ori_entity_id: Optional[str] = None
+    ori_chain_id: Optional[str] = None
 
     def __post_init__(self):
         assert len(set(self.modifications)) == len(
@@ -119,7 +120,7 @@ class PolymerChainSequence(BaseChainSequence):
         return n_tokens
 
 
-@dataclass(kw_only=True)
+@dataclass
 class LigandChainSequence(BaseChainSequence):
     """
     Sequence-like descriptor for a ligand (non-polymer) chain.
@@ -130,11 +131,11 @@ class LigandChainSequence(BaseChainSequence):
     well-formed instance.
 
     Attributes:
-        ccd_codes (tuple[str] | None): Ordered component codes along the chain.
-        file_path (Path | None): Path to a file describing the ligand (e.g., SDF).
-        smiles (str | None): SMILES string describing the ligand or assembly.
-        ori_entity_id (str | None): Entity ID from the source structure.
-        ori_chain_id (str | None): Chain identifier from the source structure.
+        ccd_codes (Optional[tuple[str]]): Ordered component codes along the chain.
+        file_path (Optional[Path]): Path to a file describing the ligand (e.g., SDF).
+        smiles (Optional[str]): SMILES string describing the ligand or assembly.
+        ori_entity_id (Optional[str]): Entity ID from the source structure.
+        ori_chain_id (Optional[str]): Chain identifier from the source structure.
         entity_type (str): Entity type, expected to be `LIGAND`.
 
     Equality/Hashing:
@@ -145,11 +146,11 @@ class LigandChainSequence(BaseChainSequence):
         Otherwise, they are considered unequal. Hashing follows these fields.
     """
 
-    ccd_codes: tuple[str] | None = None
-    file_path: Path | None = None
-    smiles: str | None = None
-    ori_entity_id: str | None = None
-    ori_chain_id: str | None = None
+    ccd_codes: Optional[tuple[str]] = None
+    file_path: Optional[Path] = None
+    smiles: Optional[str] = None
+    ori_entity_id: Optional[str] = None
+    ori_chain_id: Optional[str] = None
     entity_type: str = LIGAND
 
     def __post_init__(self):
@@ -269,7 +270,7 @@ class LigandChainSequence(BaseChainSequence):
         return Chem.MolToSmiles(Chem.RemoveHs(mol))
 
 
-@dataclass(kw_only=True)
+@dataclass
 class Bond:
     """
     Explicit bond between two atoms, identified in chain/residue/atom space.
@@ -286,8 +287,8 @@ class Bond:
         chain_index_2 (int): Index into `Sequences.sequences` for the second atom.
         res_id_2 (int): Residue ID of the second atom within its chain.
         atom_name_2 (str): Atom name of the second atom.
-        ori_chain_id_1 (str | None): Original chain ID for the first atom.
-        ori_chain_id_2 (str | None): Original chain ID for the second atom.
+        ori_chain_id_1 (Optional[str]): Original chain ID for the first atom.
+        ori_chain_id_2 (Optional[str]): Original chain ID for the second atom.
     """
 
     chain_index_1: int
@@ -298,8 +299,8 @@ class Bond:
     res_id_2: int
     atom_name_2: str
 
-    ori_chain_id_1: str | None = None
-    ori_chain_id_2: str | None = None
+    ori_chain_id_1: Optional[str] = None
+    ori_chain_id_2: Optional[str] = None
 
     def is_intra_chain(self) -> bool:
         """
@@ -338,7 +339,7 @@ class Bond:
         return self.is_inter_chain() | (self.res_id_1 != self.res_id_2)
 
 
-@dataclass(kw_only=True)
+@dataclass
 class Sequences:
     """
     Container for all chain sequences in a structure and a filtered bond set.
@@ -348,7 +349,7 @@ class Sequences:
     methods to construct itself from an mmCIF file and utilities to count tokens.
 
     Attributes:
-        sequences (tuple[PolymerChainSequence | LigandChainSequence]): Ordered chain
+        sequences (tuple[Union[PolymerChainSequence, LigandChainSequence]]): Ordered chain
             descriptors. The order defines `chain_index` used by `Bond`.
         bonds (tuple[Bond]): Filtered bonds spanning intra- and inter-chain links,
             excluding trivial same-residue polymer bonds and adjacent polymer
@@ -361,7 +362,7 @@ class Sequences:
     """
 
     name: str
-    sequences: tuple[PolymerChainSequence | LigandChainSequence]
+    sequences: tuple[Union[PolymerChainSequence, LigandChainSequence]]
     bonds: tuple[Bond] = tuple()
 
     @staticmethod
@@ -434,7 +435,7 @@ class Sequences:
     @staticmethod
     def _get_bonds_from_structure(
         structure: Structure,
-        seqs_lst: list[PolymerChainSequence | LigandChainSequence],
+        seqs_lst: list[Union[PolymerChainSequence, LigandChainSequence]],
         keep_polymer_crosslinks: bool = False,
     ) -> tuple[Bond]:
         # Map ori_chain_id to chain_index
@@ -492,10 +493,10 @@ class Sequences:
     @classmethod
     def from_mmcif(
         cls,
-        mmcif: Path | str,
+        mmcif: Union[Path, str],
         model: int = 1,
         altloc: str = "first",
-        assembly_id: str | None = None,
+        assembly_id: Optional[str] = None,
     ) -> "Sequences":
         """
         Construct a `Sequences` object from an mmCIF file.

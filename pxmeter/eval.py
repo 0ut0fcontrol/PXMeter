@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import warnings
+from typing import Optional, Union
 
 import numpy as np
 from ml_collections.config_dict import ConfigDict
@@ -33,10 +34,10 @@ def evaluate(
     ref_cif: str,
     model_cif: str,
     ref_model: int = 1,
-    ref_assembly_id: str | None = None,
-    ref_altloc: str | None = "first",
-    model_chain_id_to_lig_mol: dict[str, Chem.Mol] | None = None,
-    interested_lig_label_asym_id: list[str] | str | None = None,
+    ref_assembly_id: Optional[str] = None,
+    ref_altloc: Optional[str] = "first",
+    model_chain_id_to_lig_mol: Optional[dict[str, Chem.Mol]] = None,
+    interested_lig_label_asym_id: Optional[Union[list[str], str]] = None,
     run_config: ConfigDict = RUN_CONFIG,
 ) -> MetricResult:
     """

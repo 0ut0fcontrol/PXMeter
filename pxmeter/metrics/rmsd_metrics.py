@@ -13,6 +13,8 @@
 # limitations under the License.
 
 
+from typing import Union
+
 import numpy as np
 from scipy.spatial import KDTree
 
@@ -36,7 +38,7 @@ class RMSDMetrics:
         self,
         ref_struct: Structure,
         model_struct: Structure,
-        ref_lig_label_asym_id: str | list[str],
+        ref_lig_label_asym_id: Union[str, list[str]],
     ):
         self.ref_struct = ref_struct
         self.model_struct = model_struct
@@ -45,7 +47,7 @@ class RMSDMetrics:
     @staticmethod
     def _find_ligand_and_pocket_by_lig_id(
         struct: Structure,
-        lig_label_asym_id: str | list[str],
+        lig_label_asym_id: Union[str, list[str]],
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Find the ligand and its corresponding pocket by ligand label asym_id.

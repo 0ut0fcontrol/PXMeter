@@ -18,7 +18,7 @@ import gzip
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence, Union
 
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
@@ -43,11 +43,11 @@ class MMCIFParser:
                                        It can be either a Path object or a string.
     """
 
-    def __init__(self, mmcif_file: Path | str):
+    def __init__(self, mmcif_file: Union[Path, str]):
         self.mmcif_file = mmcif_file
         self.cif = self._parse(mmcif_file)
 
-    def _parse(self, mmcif_file: str | Path) -> pdbx.CIFFile:
+    def _parse(self, mmcif_file: Union[str, Path]) -> pdbx.CIFFile:
         """
         Parses a given mmCIF file and returns a CIFFile object.
 
@@ -67,7 +67,7 @@ class MMCIFParser:
                 cif_file = pdbx.CIFFile.read(f)
         return cif_file
 
-    def get_category_table(self, name: str) -> pd.DataFrame | None:
+    def get_category_table(self, name: str) -> Optional[pd.DataFrame]:
         """
         Retrieve a category table from the CIF block as a pandas DataFrame.
 
@@ -194,7 +194,7 @@ class MMCIFParser:
         return seq
 
     def get_poly_res_names(
-        self, atom_array: AtomArray | None = None
+        self, atom_array: Optional[AtomArray] = None
     ) -> dict[str, list[str]]:
         """
         Get 3-letter residue names by combining mmcif._entity_poly_seq and AtomArray.
@@ -327,7 +327,7 @@ class MMCIFParser:
         self,
         model: int = 1,
         altloc: str = "first",
-        assembly_id: str | None = None,
+        assembly_id: Optional[str] = None,
         include_bonds: bool = True,
     ) -> AtomArray:
         """
@@ -397,7 +397,7 @@ class MMCIFParser:
 
     @staticmethod
     def atom_array_to_atom_site(
-        array: AtomArray, extra_fields: list[str] | None = None
+        array: AtomArray, extra_fields: Optional[list[str]] = None
     ):
         """
         Convert an AtomArray to a PDBx category "atom_site".

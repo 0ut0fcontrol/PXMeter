@@ -18,6 +18,7 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional, Union
 
 from pxmeter.constants import DNA, LIGAND, PROTEIN, RNA
 from pxmeter.input_builder.seq import (
@@ -29,7 +30,7 @@ from pxmeter.input_builder.seq import (
 from pxmeter.utils import int_to_letters
 
 
-@dataclass(kw_only=True)
+@dataclass
 class ProtenixEntity:
     """
     Protenix entity wrapper for a polymer or ligand sequence.
@@ -42,19 +43,19 @@ class ProtenixEntity:
 
     Attributes:
         entity_id (int): 1-based entity identifier in the Protenix input.
-        sequence (PolymerChainSequence | LigandChainSequence): Chain sequence
+        sequence (Union[PolymerChainSequence, LigandChainSequence]): Chain sequence
             descriptor for this entity.
         count (int): Number of chain copies for this entity.
-        msa_path (Path | None): Optional path to a precomputed MSA directory.
+        msa_path (Optional[Path]): Optional path to a precomputed MSA directory.
         pairing_db (str): Name of the pairing database for MSA (e.g. "uniref100").
         ori_chain_ids (tuple[str]): Original chain IDs (one per copy).
     """
 
     entity_id: int
-    sequence: PolymerChainSequence | LigandChainSequence
+    sequence: Union[PolymerChainSequence, LigandChainSequence]
     count: int
 
-    msa_path: Path | None = None
+    msa_path: Optional[Path] = None
     pairing_db: str = "uniref100"
     ori_chain_ids: tuple[str] = tuple()
 
@@ -140,7 +141,7 @@ class ProtenixEntity:
             return {"ligand": {"ligand": lig_seq, "count": self.count}}
 
 
-@dataclass(kw_only=True)
+@dataclass
 class ProtenixBond:
     """
     Covalent bond between two entities/copies in Protenix schema.
@@ -185,7 +186,7 @@ class ProtenixBond:
         }
 
 
-@dataclass(kw_only=True)
+@dataclass
 class ProtenixInput:
     """
     Top-level Protenix job description.
@@ -410,7 +411,7 @@ class ProtenixInput:
         )
 
     @classmethod
-    def from_json_file(cls, json_f: Path | str) -> "ProtenixInput":
+    def from_json_file(cls, json_f: Union[Path, str]) -> "ProtenixInput":
         """
         Load a ProtenixInput from a JSON file.
 

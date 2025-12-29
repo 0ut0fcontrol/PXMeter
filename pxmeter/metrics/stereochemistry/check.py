@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -57,7 +57,7 @@ class StereoChemValidator:
     def __init__(
         self,
         struct: Structure,
-        ref_struct: Structure | None = None,
+        ref_struct: Optional[Structure] = None,
     ):
         self.struct = struct
         self.ref_struct = ref_struct
@@ -236,8 +236,8 @@ class StereoChemValidator:
 
     def find_bad_bonds(
         self,
-        bond_data: dict[str, dict[str, tuple[float, float]]] | None = None,
-        inter_res_bond_data: dict[str, dict[str, list[float]]] | None = None,
+        bond_data: Optional[dict[str, dict[str, tuple[float, float]]]] = None,
+        inter_res_bond_data: Optional[dict[str, dict[str, list[float]]]] = None,
         z_thresh: float = 12.0,
     ) -> pd.DataFrame:
         """
@@ -292,7 +292,7 @@ class StereoChemValidator:
 
     def find_bad_inter_res_bonds(
         self,
-        inter_res_bond_data: dict[str, dict[str, tuple[float, float]]] | None = None,
+        inter_res_bond_data: Optional[dict[str, dict[str, tuple[float, float]]]] = None,
         z_thresh: float = 12.0,
     ) -> pd.DataFrame:
         """
@@ -393,7 +393,7 @@ class StereoChemValidator:
 
     def find_bad_intra_res_bonds(
         self,
-        bond_data: dict[str, dict[str, tuple[float, float]]] | None = None,
+        bond_data: Optional[dict[str, dict[str, tuple[float, float]]]] = None,
         z_thresh: float = 12.0,
     ) -> pd.DataFrame:
         """
@@ -552,7 +552,9 @@ class StereoChemValidator:
 
     def find_bad_inter_res_angles(
         self,
-        inter_res_angle_data: dict[str, dict[str, tuple[float, float]]] | None = None,
+        inter_res_angle_data: Optional[
+            dict[str, dict[str, tuple[float, float]]]
+        ] = None,
         z_thresh: float = 12.0,
     ) -> pd.DataFrame:
         """
@@ -711,7 +713,7 @@ class StereoChemValidator:
 
     def find_bad_intra_res_angles(
         self,
-        angle_data: dict[str, dict[str, tuple[float, float]]] | None = None,
+        angle_data: Optional[dict[str, dict[str, tuple[float, float]]]] = None,
         z_thresh: float = 12.0,
     ) -> pd.DataFrame:
         """
@@ -913,8 +915,10 @@ class StereoChemValidator:
 
     def find_bad_angles(
         self,
-        angle_data: dict[str, dict[str, tuple[float, float]]] | None = None,
-        inter_res_angle_data: dict[str, dict[str, tuple[float, float]]] | None = None,
+        angle_data: Optional[dict[str, dict[str, tuple[float, float]]]] = None,
+        inter_res_angle_data: Optional[
+            dict[str, dict[str, tuple[float, float]]]
+        ] = None,
         z_thresh: float = 12.0,
     ) -> pd.DataFrame:
         """
@@ -963,9 +967,9 @@ class StereoChemValidator:
 
     def find_clashes(
         self,
-        query_mask: Sequence[bool] | None = None,
-        vdw_scale_factor: float | None = None,
-        tolerance: float | None = 1.5,
+        query_mask: Optional[Sequence[bool]] = None,
+        vdw_scale_factor: Optional[float] = None,
+        tolerance: Optional[float] = 1.5,
         disulfide_clash_tolerance: float = 1.0,
         cutoff: float = 3.0,
     ) -> pd.DataFrame:

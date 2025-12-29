@@ -18,6 +18,7 @@ import json
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Union
 
 from pxmeter.constants import DNA, LIGAND, PROTEIN, RNA
 from pxmeter.input_builder.seq import (
@@ -30,7 +31,7 @@ from pxmeter.input_builder.utils.unstd_res_mapping import AF3_CCD_NAME_TO_ONE_LE
 from pxmeter.utils import int_to_letters
 
 
-@dataclass(kw_only=True)
+@dataclass
 class AlpahFold3Input:
     """
     AlphaFold3-style model input wrapper.
@@ -49,7 +50,7 @@ class AlpahFold3Input:
 
     name: str
     seeds: list[int]
-    sequences: tuple[PolymerChainSequence | LigandChainSequence]
+    sequences: tuple[Union[PolymerChainSequence, LigandChainSequence]]
     bonds: tuple[Bond] = tuple()
 
     @staticmethod
@@ -267,7 +268,7 @@ class AlpahFold3Input:
         )
 
     @classmethod
-    def from_json_file(cls, json_f: Path | str) -> "AlpahFold3Input":
+    def from_json_file(cls, json_f: Union[Path, str]) -> "AlpahFold3Input":
         """
         Load an AlphaFold3 input from a JSON file.
 

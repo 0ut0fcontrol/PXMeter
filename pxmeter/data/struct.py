@@ -15,7 +15,7 @@
 import copy
 import dataclasses
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence, Union
 
 import numpy as np
 from biotite.structure import AtomArray, CellList
@@ -71,10 +71,10 @@ class Structure:
     @classmethod
     def from_mmcif(
         cls,
-        mmcif: Path | str,
+        mmcif: Union[Path, str],
         model: int = 1,
         altloc: str = "first",
-        assembly_id: str | None = None,
+        assembly_id: Optional[str] = None,
         include_bonds: bool = True,
     ) -> "Structure":
         """
@@ -214,7 +214,7 @@ class Structure:
         return aids_mask
 
     def get_mask_for_given_entity_types(
-        self, entity_types: list[str] | str
+        self, entity_types: Union[list[str], str]
     ) -> np.ndarray:
         """
         Get a mask of atoms given entity types.
@@ -369,7 +369,7 @@ class Structure:
         self.entity_poly_type = new_entity_poly_type
 
     def select_substructure(
-        self, mask: Sequence[int | bool], reset_uni_id: bool = False
+        self, mask: Sequence[Union[int, bool]], reset_uni_id: bool = False
     ) -> "Structure":
         """
         Select a substructure from the Structure by a mask.
@@ -611,7 +611,7 @@ class Structure:
 
     def to_cif(
         self,
-        output_cif: str | Path,
+        output_cif: Union[str, Path],
         use_uni_chain_id: bool = False,
         include_bonds: bool = False,
     ):

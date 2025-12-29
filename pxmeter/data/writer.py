@@ -14,6 +14,7 @@
 
 from collections import defaultdict
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from biotite.structure import AtomArray, get_chain_starts, get_residue_starts
@@ -39,7 +40,7 @@ class CIFWriter:
         self,
         atom_array: AtomArray,
         entity_poly_type: dict[str, str] = None,
-        atom_array_output_mask: np.ndarray | None = None,
+        atom_array_output_mask: Optional[np.ndarray] = None,
     ):
         self.atom_array = atom_array
         self.entity_poly_type = entity_poly_type

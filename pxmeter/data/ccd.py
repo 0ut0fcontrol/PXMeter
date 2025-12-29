@@ -77,12 +77,22 @@ def get_ccd_mol_by_atom_names(ccd_code: str, atom_names: list[str] = None) -> Ch
         ccd_code (str): CCD code
         atom_names (list[str], optional): A list of atom names.
                                           Atoms not in the list will be removed from the mol.
-                                          Defaults to None（return the whole mol).
+                                          Defaults to None (return the whole mol).
 
     Returns:
         Chem.Mol: A rdkit mol of the CCD code, with the atom property "atom_name".
     """
     mol = copy.deepcopy(get_ccd_mol_from_cif(ccd_code))
+
+    # Convert explicit Hs to implicit Hs to ensure
+    # correct valency and aromaticity perception
+    mol = Chem.RemoveHs(mol)
+
+    # Reset atom_map after removing Hs
+    mol.atom_map = {
+        atom.GetPDBResidueInfo().GetName(): atom.GetIdx() for atom in mol.GetAtoms()
+    }
+
     atom_name_to_idx = mol.atom_map
     idx_to_atom_name = {v: k for k, v in atom_name_to_idx.items()}
 
@@ -101,6 +111,17 @@ def get_ccd_mol_by_atom_names(ccd_code: str, atom_names: list[str] = None) -> Ch
     for atom_idx in atoms_to_remove:
         edit_mol.RemoveAtom(atom_idx)
     new_mol = edit_mol.GetMol()
+
+    try:
+        new_mol.UpdatePropertyCache(strict=False)
+        # Attempt to sanitize but skip kekulization
+        # if it's already aromatic or has issues
+        Chem.SanitizeMol(
+            new_mol, sanitizeOps=Chem.SANITIZE_ALL ^ Chem.SANITIZE_KEKULIZE
+        )
+    except Exception:
+        pass
+
     return new_mol
 
 
@@ -160,7 +181,10 @@ def get_ccd_mol_from_chain_atom_array(chain_atom_array: AtomArray) -> Chem.Mol:
 
     inter_res_bonds = get_inter_residue_bonds(chain_atom_array)
     if inter_res_bonds.shape[0] == 0:
-        Chem.SanitizeMol(combo_mols)
+        try:
+            Chem.SanitizeMol(combo_mols)
+        except Exception as e:
+            logging.warning(f"Could not sanitize mol(s): {e}")
         combo_mols = _set_coord_by_chain_atom_array(
             mol=combo_mols, chain_atom_array=chain_atom_array
         )
@@ -188,7 +212,10 @@ def get_ccd_mol_from_chain_atom_array(chain_atom_array: AtomArray) -> Chem.Mol:
         mol_atom_2 = res_id_atom_name_to_idx[f"{res_id2}_{atom_name2}"]
         edcombo.AddBond(mol_atom_1, mol_atom_2, order=Chem.rdchem.BondType.SINGLE)
     new_mol = edcombo.GetMol()
-    Chem.SanitizeMol(new_mol)
+    try:
+        Chem.SanitizeMol(new_mol)
+    except Exception as e:
+        logging.warning(f"Could not sanitize new_mol: {e}")
     new_mol = _set_coord_by_chain_atom_array(
         mol=new_mol, chain_atom_array=chain_atom_array
     )

@@ -81,5 +81,6 @@ def evaluate(
         ori_model_chain_ids=ori_model_chain_ids,
         interested_lig_label_asym_id=interested_lig_label_asym_id,
         metric_config=run_config.metric,
+        update_data={"chain_mapping_anchors": map_result.chain_mapping_anchors},
     )
     return metric_result

@@ -259,6 +259,8 @@ class MetricResult:
 
     ori_model_chain_ids: list[str] | None = None
 
+    update_data: dict[str, Any] | None = None
+
     @staticmethod
     def _get_chain_info(ref_struct: Structure) -> dict[str, dict[str, str]]:
         """
@@ -425,6 +427,7 @@ class MetricResult:
         ori_model_chain_ids: list[str] | None = None,
         interested_lig_label_asym_id: str | list[str] | None = None,
         metric_config: ConfigDict = RUN_CONFIG.metric,
+        update_data: dict[str, Any] | None = None,
     ) -> "MetricResult":
         """
         Create a MetricResult instance from given structures and features.
@@ -437,6 +440,8 @@ class MetricResult:
                 specifying the ligand label asym IDs of interest.
             metric_config (dict[str, Any]): A dictionary containing configuration for
                           metrics. Defaults to RUN_CONFIG.metric.
+            update_data (dict[str, Any] | None): A dictionary containing additional data to update.
+                Defaults to None.
 
         Returns:
             MetricResult: An instance of MetricResult containing the calculated metrics.
@@ -548,6 +553,7 @@ class MetricResult:
             interface=interface_result_dict,
             pb_valid=chain_pb_valid_dict,
             ori_model_chain_ids=ori_model_chain_ids,
+            update_data=update_data,
         )
 
     def to_json_dict(self) -> dict[str, Any]:
@@ -589,6 +595,9 @@ class MetricResult:
 
         if update_data:
             json_dict.update(update_data)
+
+        if self.update_data is not None:
+            json_dict.update(self.update_data)
 
         with open(json_file, "w", encoding="utf-8") as f:
             json.dump(json_dict, f, indent=4, ensure_ascii=False)

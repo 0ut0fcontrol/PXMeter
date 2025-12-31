@@ -22,11 +22,9 @@ from biotite import setup_ccd
 
 from pxmeter.configs.run_config import apply_run_config_overrides
 from pxmeter.eval import evaluate, MetricResult
-from pxmeter.input_builder.gen_input import (
-    run_gen_input,
-    VALID_INPUT_TYPES,
-    VALID_OUTPUT_TYPES,
-)
+from pxmeter.input_builder.constants import VALID_INPUT_TYPES, VALID_OUTPUT_TYPES
+from pxmeter.input_builder.gen_input import run_gen_input
+from pxmeter.input_builder.interactive import run_interactive_gen
 from pxmeter.utils import read_chain_id_to_mol_from_json
 
 logging.basicConfig(
@@ -82,7 +80,10 @@ def run_eval_cif(
     return metric_result
 
 
-@click.group(invoke_without_command=True)
+@click.group(
+    invoke_without_command=True,
+    context_settings=dict(help_option_names=["-h", "--help"]),
+)
 @click.option("-r", "--ref_cif", type=Path, help="Path to the reference CIF file.")
 @click.option("-m", "--model_cif", type=Path, help="Path to the model CIF file.")
 @click.option(
@@ -206,7 +207,7 @@ def update():
     "--input",
     "input_path",
     type=click.Path(path_type=Path, exists=True),
-    required=True,
+    required=False,
     help="Input file or directory.",
 )
 @click.option(
@@ -214,22 +215,28 @@ def update():
     "--output",
     "output_path",
     type=click.Path(path_type=Path),
-    required=True,
+    required=False,
     help="Output file or directory.",
 )
 @click.option(
     "-it",
     "--input-type",
     type=click.Choice(VALID_INPUT_TYPES, case_sensitive=False),
-    required=True,
+    required=False,
     help="Input type, choices: " + ", ".join(VALID_INPUT_TYPES),
 )
 @click.option(
     "-ot",
     "--output-type",
     type=click.Choice(VALID_OUTPUT_TYPES, case_sensitive=False),
-    required=True,
+    required=False,
     help="Output type, choices: " + ", ".join(VALID_OUTPUT_TYPES),
+)
+@click.option(
+    "-I",
+    "--interactive",
+    is_flag=True,
+    help="Run in interactive mode to create an input file.",
 )
 @click.option(
     "-p",
@@ -274,12 +281,13 @@ def update():
     help="Number of CPUs to use. Defaults to -1 (all available).",
 )
 def gen_input_cli(
-    input_path: Path,
-    output_path: Path,
-    input_type: str,
-    output_type: str,
-    seeds: list[int] = None,
-    num_seeds: int = None,
+    input_path: Optional[Path],
+    output_path: Optional[Path],
+    input_type: Optional[str],
+    output_type: Optional[str],
+    interactive: bool,
+    seeds: Optional[str] = None,
+    num_seeds: Optional[int] = None,
     assembly_id: Optional[str] = None,
     pdb_ids: Optional[str] = None,
     num_cpu: int = -1,
@@ -287,10 +295,19 @@ def gen_input_cli(
     """
     Generate model inputs.
     """
+    if interactive:
+        run_interactive_gen()
+        return
+
+    if not all([input_path, output_path, input_type, output_type]):
+        raise click.UsageError(
+            "The following options are required when not in interactive mode: --input, --output, --input-type, --output-type"
+        )
+
     if seeds is not None:
         seeds_lst = [int(x.strip()) for x in seeds.split(",") if x.strip()]
     else:
-        seeds_lst = seeds
+        seeds_lst = None
 
     run_gen_input(
         input_path,

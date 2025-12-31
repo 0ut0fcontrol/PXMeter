@@ -22,13 +22,12 @@ from typing import Optional
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
+from pxmeter.input_builder.constants import VALID_INPUT_TYPES, VALID_OUTPUT_TYPES
+from pxmeter.input_builder.interactive import run_interactive_gen
 from pxmeter.input_builder.model_inputs.alphafold3 import AlpahFold3Input
 from pxmeter.input_builder.model_inputs.boltz import BoltzInput
 from pxmeter.input_builder.model_inputs.protenix import ProtenixInput
 from pxmeter.input_builder.seq import Sequences
-
-VALID_INPUT_TYPES = ["cif", "af3", "protenix", "boltz"]
-VALID_OUTPUT_TYPES = ["af3", "protenix", "boltz"]
 
 
 def gen_one(
@@ -187,9 +186,10 @@ def run_gen_input(
     output_type = output_type.strip().lower()
 
     input_is_dir = input_path.is_dir()
-    output_is_dir = (output_path.exists() and output_path.is_dir()) or (
-        not output_path.exists() and output_path.suffix == ""
-    )
+    if output_path.exists():
+        output_is_dir = output_path.is_dir()
+    else:
+        output_is_dir = input_is_dir if output_path.suffix == "" else False
 
     assert input_type in VALID_INPUT_TYPES, f"Unsupported input type: {input_type}"
     assert output_type in VALID_OUTPUT_TYPES, f"Unsupported output type: {output_type}"
@@ -240,16 +240,14 @@ def run_gen_input(
                     input_and_output_files.append(
                         (
                             input_f,
-                            output_path
-                            / str(input_f.name).replace(
-                                input_suffixes, output_suffixes
-                            ),
+                            output_path / input_f.with_suffix(output_suffixes).name,
                         )
                     )
 
         if len(input_and_output_files) == 0:
             raise RuntimeError(
-                f"No input files with suffixes {input_suffixes} found under directory: {input_path}"
+                f"No input files with suffixes {input_suffixes} found under "
+                f"directory: {input_path}"
             )
         gen_batch(
             input_and_output_files,
@@ -268,17 +266,17 @@ def run_gen_input(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate model inputs")
     parser.add_argument(
-        "-i", "--input", type=Path, required=True, help="Input file or directory"
+        "-i", "--input", type=Path, required=False, help="Input file or directory"
     )
     parser.add_argument(
-        "-o", "--output", type=Path, required=True, help="Output file or directory"
+        "-o", "--output", type=Path, required=False, help="Output file or directory"
     )
     parser.add_argument(
         "-it",
         "--input-type",
         dest="input_type",
         type=str,
-        required=True,
+        required=False,
         help="Input type, choices: " + ", ".join(VALID_INPUT_TYPES),
         choices=VALID_INPUT_TYPES,
     )
@@ -287,23 +285,35 @@ if __name__ == "__main__":
         "--output-type",
         dest="output_type",
         type=str,
-        required=True,
+        required=False,
         help="Output type, choices: " + ", ".join(VALID_OUTPUT_TYPES),
         choices=VALID_OUTPUT_TYPES,
+    )
+    parser.add_argument(
+        "-I",
+        "--interactive",
+        action="store_true",
+        help="Run in interactive mode to create an input file.",
     )
     parser.add_argument(
         "-s",
         "--seeds",
         type=str,
         default=None,
-        help=r'Comma-separated seeds, e.g. "0,1,2"; required if --num-seeds is not provided (excluding "-ot boltz").',
+        help=(
+            "Comma-separated seeds, e.g. '0,1,2'; required if --num-seeds "
+            "is not provided (excluding '-ot boltz')."
+        ),
     )
     parser.add_argument(
         "-ns",
         "--num-seeds",
         type=int,
         default=None,
-        help=r'Number of seeds; required if --seeds is not provided (excluding "-ot boltz").',
+        help=(
+            "Number of seeds; required if --seeds is not provided "
+            "(excluding '-ot boltz')."
+        ),
     )
     parser.add_argument(
         "-a",
@@ -311,7 +321,10 @@ if __name__ == "__main__":
         dest="assembly_id",
         type=str,
         default=None,
-        help="Assembly ID in the input CIF file. Defaults to None. Ignored for non-CIF input types.",
+        help=(
+            "Assembly ID in the input CIF file. Defaults to None. "
+            "Ignored for non-CIF input types."
+        ),
     )
     parser.add_argument("-n", "--num-cpu", type=int, default=-1, help="Number of CPUs")
     parser.add_argument(
@@ -322,12 +335,23 @@ if __name__ == "__main__":
         default=None,
         help=(
             "PDB IDs as a comma-separated string (e.g. '7n0a,7rss') "
-            "or a path to a text file containing one PDB ID per line."
-            "This option is only applicable when the input is a directory."
-            "If not provided, all files in the input directory will be processed."
+            "or a path to a text file containing one PDB ID per line. "
+            "This option is only applicable when the input is a directory. "
+            "If not provided, all files in the input directory will be "
+            "processed."
         ),
     )
     args = parser.parse_args()
+
+    if args.interactive:
+        run_interactive_gen()
+        exit(0)
+
+    if not all([args.input, args.output, args.input_type, args.output_type]):
+        parser.error(
+            "The following arguments are required when not in interactive "
+            "mode: -i, -o, -it, -ot"
+        )
 
     if args.seeds is not None:
         seeds_lst = [int(x.strip()) for x in args.seeds.split(",") if x.strip()]

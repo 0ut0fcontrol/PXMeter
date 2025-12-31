@@ -302,6 +302,22 @@ class Bond:
     ori_chain_id_1: Optional[str] = None
     ori_chain_id_2: Optional[str] = None
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Bond):
+            return False
+        atom1 = (self.chain_index_1, self.res_id_1, self.atom_name_1)
+        atom2 = (self.chain_index_2, self.res_id_2, self.atom_name_2)
+        other1 = (other.chain_index_1, other.res_id_1, other.atom_name_1)
+        other2 = (other.chain_index_2, other.res_id_2, other.atom_name_2)
+        return (atom1 == other1 and atom2 == other2) or (
+            atom1 == other2 and atom2 == other1
+        )
+
+    def __hash__(self) -> int:
+        atom1 = (self.chain_index_1, self.res_id_1, self.atom_name_1)
+        atom2 = (self.chain_index_2, self.res_id_2, self.atom_name_2)
+        return hash(frozenset([atom1, atom2]))
+
     def is_intra_chain(self) -> bool:
         """
         Return whether both atoms are on the same chain.

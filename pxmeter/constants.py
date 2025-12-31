@@ -43,7 +43,35 @@ DNA_STD_RESIDUES = ("DA", "DG", "DC", "DT", "DN")
 
 STD_RESIDUES = PRO_STD_RESIDUES + RNA_STD_RESIDUES + DNA_STD_RESIDUES
 
-PRO_STD_RESIDUES_ONE_LETTER = tuple("ARNDCQEGHILKMFPSTWYVBZX")
+PRO_STD_RESIDUES_ONE_LETTER = tuple("ACDEFGHIKLMNPQRSTVWYX")
+DNA_STD_RESIDUES_ONE_LETTER = tuple("ATCGN")
+RNA_STD_RESIDUES_ONE_LETTER = tuple("AUCGN")
+
+PRO_ONE_TO_THREE = {
+    "A": "ALA",
+    "R": "ARG",
+    "N": "ASN",
+    "D": "ASP",
+    "C": "CYS",
+    "Q": "GLN",
+    "E": "GLU",
+    "G": "GLY",
+    "H": "HIS",
+    "I": "ILE",
+    "L": "LEU",
+    "K": "LYS",
+    "M": "MET",
+    "F": "PHE",
+    "P": "PRO",
+    "S": "SER",
+    "T": "THR",
+    "W": "TRP",
+    "Y": "TYR",
+    "V": "VAL",
+    "X": "UNK",
+}
+DNA_ONE_TO_THREE = {"A": "DA", "C": "DC", "G": "DG", "T": "DT", "N": "DN"}
+RNA_ONE_TO_THREE = {"A": "A", "C": "C", "G": "G", "U": "U", "N": "N"}
 
 PROTEIN_BACKBONE = ("N", "CA", "C", "O")
 NUC_BACKBONE = (

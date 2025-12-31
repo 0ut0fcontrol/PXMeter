@@ -32,6 +32,32 @@ The tool works on **single files** or **directories** (flat directory only).
 
 ---
 
+## 🎮 Interactive Mode
+
+If you don't have a source file and want to build a model input from scratch, you can use the **Interactive Mode**.
+
+### How to Start
+```bash
+pxm gen-input -I
+# or
+pxm gen-input --interactive
+```
+
+### Features
+*   **Step-by-step Guidance**: The tool will walk you through selecting the output format, naming the job, and adding components.
+*   **Load from Existing File**: You can optionally initialize your complex by loading components and bonds from an existing file (`.cif`, `.json` for AF3/Protenix, or `.yaml` for Boltz).
+*   **Component Management**:
+    *   **Add Polymer**: Enter sequence strings (validated against standard alphabets) and add modifications at specific positions.
+    *   **Add Ligand**: Support for CCD codes, SMILES, and file paths (validated against model-specific limits).
+    *   **Remove Component**: Easily remove any added chain. All affected covalent bonds will be automatically cleaned up or re-indexed.
+*   **Covalent Bonds**: Add bonds between any two atoms across chains with real-time range validation for Residue IDs.
+*   **User-friendly Interface**:
+    *   **Numbered Menus**: Quick selection using numbers (1, 2, 3...) instead of typing commands.
+    *   **Smart Defaults**: Press `Enter` to accept recommended values (marked with `*`).
+    *   **Live Preview**: See your complex grow as you add or modify components.
+
+---
+
 ## ⚙️ Key Arguments
 
 ### Mandatory

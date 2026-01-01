@@ -88,7 +88,7 @@ class ProtenixEntity:
                 if self.sequence.modifications:
                     entity_dict["modifications"] = [
                         {
-                            "ptmType": mod_type,
+                            "ptmType": f"CCD_{mod_type}",
                             "ptmPosition": mod_pos,
                         }
                         for mod_pos, mod_type in self.sequence.modifications
@@ -105,7 +105,7 @@ class ProtenixEntity:
                 if self.sequence.modifications:
                     entity_dict["modifications"] = [
                         {
-                            "modificationType": mod_type,
+                            "modificationType": f"CCD_{mod_type}",
                             "basePosition": mod_pos,
                         }
                         for mod_pos, mod_type in self.sequence.modifications

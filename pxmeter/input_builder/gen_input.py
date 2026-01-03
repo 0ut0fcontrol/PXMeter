@@ -193,7 +193,9 @@ def run_gen_input(
 
     assert input_type in VALID_INPUT_TYPES, f"Unsupported input type: {input_type}"
     assert output_type in VALID_OUTPUT_TYPES, f"Unsupported output type: {output_type}"
-    assert input_type != output_type, "Input type and output type should be different."
+
+    if input_type == output_type:
+        logging.warning("Input type and output type are the same")
 
     if output_type != "boltz":
         assert (input_is_dir and output_is_dir) or (

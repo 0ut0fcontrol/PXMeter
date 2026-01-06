@@ -75,14 +75,16 @@ pxm gen-input --interactive
 
 ---
 
-### Seeds (for AF3 / Protenix output only)
+### Seeds (Required for AF3, Optional for Protenix)
 
-You must provide exactly one of:
+For **AlphaFold3** output, you must provide exactly one of:
 
 * `--seeds "0,1,2"` — explicit list
 * `--num-seeds N` — generates seeds `[0…N-1]`
 
-Boltz output **does not use seeds**.
+For **Protenix** output, seeds are optional. If not provided, an empty seed list will be used.
+
+**Boltz** output does not use seeds.
 
 ---
 
@@ -118,7 +120,7 @@ run_gen_input(
     output_path=Path("./af3_inputs"),
     input_type="cif",
     output_type="af3",
-    seeds=None,          # use num_seeds OR seeds, not both
+    seeds=None,          # for af3, use num_seeds OR seeds, not both
     num_seeds=5,
     assembly_id="1",
     num_cpu=8,
@@ -128,8 +130,8 @@ run_gen_input(
 Rules are the same as the CLI:
 
 * `input_type` / `output_type` must differ.
-* For `output_type` in `{ "af3", "protenix" }` you must provide **either** `seeds` **or** `num_seeds`.
-* For `output_type == "boltz"`, both `seeds` and `num_seeds` can be left as `None`.
+* For `output_type == "af3"`, you must provide **either** `seeds` **or** `num_seeds`.
+* For `output_type` in `{ "protenix", "boltz" }`, both `seeds` and `num_seeds` can be left as `None`.
 
 Example: Protenix → Boltz (no seeds needed):
 

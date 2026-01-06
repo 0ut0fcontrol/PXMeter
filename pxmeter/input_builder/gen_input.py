@@ -47,6 +47,7 @@ def gen_one(
         input_type (str): Input type, e.g. "cif", "af3", or "protenix".
         output_type (str): Output type, e.g. "af3" or "protenix".
         seeds (list[int]): List of model seeds to encode in the output.
+            Required for AF3, optional or unused for other formats.
         assembly_id (str | None, optional): Assembly ID for CIF input. Defaults to None.
     """
     output_f.parent.mkdir(parents=True, exist_ok=True)
@@ -88,6 +89,7 @@ def gen_batch(
         input_type (str): Input type for all files ("cif", "af3", or "protenix").
         output_type (str): Output type for all files ("af3" or "protenix").
         seeds (list[int]): List of model seeds to encode in each output.
+            Required for AF3, optional or unused for other formats.
         assembly_id (str | None, optional): Assembly ID for CIF input. Defaults to None.
         num_cpu (int, optional): Number of worker processes for parallelism.
             Defaults to -1 (all available cores).
@@ -160,9 +162,10 @@ def run_gen_input(
         output_path (Path): Output file or directory path.
         input_type (str): Input type ("cif", "af3", or "protenix").
         output_type (str): Output type ("af3" or "protenix").
-        seeds (list[int], optional): Explicit list of seeds. Exactly one of
-            `seeds` or `num_seeds` must be provided.
+        seeds (list[int], optional): Explicit list of seeds. For AF3 output, 
+            exactly one of `seeds` or `num_seeds` must be provided.
         num_seeds (int, optional): Number of seeds to generate as 0..num_seeds-1.
+            Required for AF3 if `seeds` is not provided.
         assembly_id (str | None, optional): Assembly ID for CIF input. Defaults to None.
         num_cpu (int, optional): Number of CPUs for parallel batch generation.
             Defaults to -1 (all available cores).
@@ -197,15 +200,19 @@ def run_gen_input(
     if input_type == output_type:
         logging.warning("Input type and output type are the same")
 
-    if output_type != "boltz":
-        assert (input_is_dir and output_is_dir) or (
-            not input_is_dir and not output_is_dir
-        ), "Input and output should be both directories or both files."
+    assert (input_is_dir and output_is_dir) or (
+        not input_is_dir and not output_is_dir
+    ), "Input and output should be both directories or both files."
+
+    if output_type == "af3":
         assert (seeds is None) != (
             num_seeds is None
         ), "Either seeds or num_seeds should be provided."
 
-        if seeds is None:
+    if seeds is None:
+        if num_seeds is None:
+            seeds = []
+        else:
             seeds = list(range(num_seeds))
 
     if input_is_dir:
@@ -304,7 +311,7 @@ if __name__ == "__main__":
         default=None,
         help=(
             "Comma-separated seeds, e.g. '0,1,2'; required if --num-seeds "
-            "is not provided (excluding '-ot boltz')."
+            "is not provided and -ot is 'af3'."
         ),
     )
     parser.add_argument(
@@ -314,7 +321,7 @@ if __name__ == "__main__":
         default=None,
         help=(
             "Number of seeds; required if --seeds is not provided "
-            "(excluding '-ot boltz')."
+            "and -ot is 'af3'."
         ),
     )
     parser.add_argument(

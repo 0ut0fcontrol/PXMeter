@@ -256,14 +256,14 @@ def update():
     "--seeds",
     type=str,
     default=None,
-    help=r'Comma-separated seeds, e.g. "0,1,2"; required if --num-seeds is not provided (excluding "-ot boltz").',
+    help=r'Comma-separated seeds, e.g. "0,1,2"; required if --num-seeds is not provided and -ot is "af3".',
 )
 @click.option(
     "-ns",
     "--num-seeds",
     type=int,
     default=None,
-    help=r'Number of seeds; required if --seeds is not provided (excluding "-ot boltz").',
+    help=r'Number of seeds; required if --seeds is not provided and -ot is "af3".',
 )
 @click.option(
     "-a",

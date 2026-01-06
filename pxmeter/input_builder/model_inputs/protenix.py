@@ -280,7 +280,7 @@ class ProtenixInput:
             ProtenixInput: Reconstructed input object.
         """
         name = json_dict["name"]
-        seeds = json_dict["modelSeeds"]
+        seeds = json_dict.get("modelSeeds", [])
 
         entity_type_mapping = {
             "proteinChain": PROTEIN,
@@ -491,7 +491,7 @@ class ProtenixInput:
         all_entity_counts = {str(seq.entity_id): seq.count for seq in self.sequences}
         json_dict = {
             "name": self.name,
-            "modelSeeds": self.seeds,
+            "modelSeeds": list(self.seeds),
             "sequences": [seq.to_dict() for seq in self.sequences],
         }
         if self.bonds:

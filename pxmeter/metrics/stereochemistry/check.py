@@ -73,6 +73,27 @@ class StereoChemValidator:
         self.res_groups = self._preprocess_residue_groups()
         self.inter_res_types = self._classify_inter_residue_types()
 
+        # Precompute VDW radii and bond hashes for clash detection
+        self._vdw_radii = self._calculate_vdw_radii()
+        self._bond_hashes = self._calculate_bond_hashes()
+
+    def _calculate_vdw_radii(self) -> np.ndarray:
+        elements = self.atom_array.element
+        unique_elements = np.unique(elements)
+        vdw_map = {e: vdw_radius_single(e) or 1.7 for e in unique_elements}
+        return np.array([vdw_map[e] for e in elements])
+
+    def _calculate_bond_hashes(self) -> np.ndarray:
+        n_atoms = len(self.atom_array)
+        bonds = self.atom_array.bonds.copy()
+        if self.ref_struct is not None:
+            assert len(self.ref_struct.atom_array) == n_atoms
+            bonds += self.ref_struct.atom_array.bonds
+        bond_array = bonds.as_array()[:, :2]
+        b_idx1 = np.minimum(bond_array[:, 0], bond_array[:, 1])
+        b_idx2 = np.maximum(bond_array[:, 0], bond_array[:, 1])
+        return np.sort(np.unique(b_idx1.astype(np.int64) * n_atoms + b_idx2))
+
     def _preprocess_residue_groups(
         self,
     ) -> dict[str, dict[str, np.ndarray]]:
@@ -989,12 +1010,6 @@ class StereoChemValidator:
         else:
             query_mask = np.asarray(query_mask, dtype=bool)
 
-        bonds = atom_array.bonds.copy()
-        if self.ref_struct is not None:
-            # Add bonds from reference structure if available
-            assert len(self.ref_struct.atom_array) == n_atoms
-            bonds += self.ref_struct.atom_array.bonds
-
         coords = atom_array.coord
         tree = KDTree(coords)
 
@@ -1007,23 +1022,22 @@ class StereoChemValidator:
         idx2 = pairs[:, 1]
 
         # 2. Filter by query_mask: at least one atom must be in query_mask
-        # Note: In the original code, it seems it checks query atoms against all atoms.
-        # But if it's an intra-structure clash, we only need to check pairs where
-        # (idx1 in query) OR (idx2 in query).
         q_filter = query_mask[idx1] | query_mask[idx2]
         idx1, idx2 = idx1[q_filter], idx2[q_filter]
         if idx1.size == 0:
             return pd.DataFrame()
 
-        # 3. Filter bonded atoms
-        bond_array = bonds.as_array()[:, :2]
-        # Hash bonds for fast filtering: idx1 * n_atoms + idx2 (enforce idx1 < idx2)
-        b_idx1 = np.minimum(bond_array[:, 0], bond_array[:, 1])
-        b_idx2 = np.maximum(bond_array[:, 0], bond_array[:, 1])
-        bond_hashes = np.sort(b_idx1.astype(np.int64) * n_atoms + b_idx2)
-
+        # 3. Filter bonded atoms using precomputed bond hashes
         pair_hashes = idx1.astype(np.int64) * n_atoms + idx2
-        is_bonded = np.isin(pair_hashes, bond_hashes)
+
+        # Fast filtering using np.searchsorted
+        bond_hashes = self._bond_hashes
+        search_idx = np.searchsorted(bond_hashes, pair_hashes)
+        is_bonded = np.zeros(len(pair_hashes), dtype=bool)
+        valid_search = search_idx < len(bond_hashes)
+        is_bonded[valid_search] = (
+            bond_hashes[search_idx[valid_search]] == pair_hashes[valid_search]
+        )
 
         idx1, idx2 = idx1[~is_bonded], idx2[~is_bonded]
         if idx1.size == 0:
@@ -1033,16 +1047,8 @@ class StereoChemValidator:
         distances = np.linalg.norm(coords[idx1] - coords[idx2], axis=1)
 
         # 5. Compute contact limits
-        # Pre-get VDW radii
-        elements = atom_array.element
-        unique_elements = np.unique(elements)
-        vdw_map = {
-            e: vdw_radius_single(e) or vdw_radius_single("C") for e in unique_elements
-        }
-        vdw_radii = np.array([vdw_map[e] for e in elements])
-
-        r1 = vdw_radii[idx1]
-        r2 = vdw_radii[idx2]
+        r1 = self._vdw_radii[idx1]
+        r2 = self._vdw_radii[idx2]
 
         if vdw_scale_factor is not None:
             contact_limits = vdw_scale_factor * (r1 + r2)
@@ -1070,6 +1076,8 @@ class StereoChemValidator:
         dist_clash = distances[clash_mask]
         limit_clash = contact_limits[clash_mask]
 
+        elements = atom_array.element
+        res_names = self._res_name
         out_df = pd.DataFrame(
             {
                 "idx1": idx1,
@@ -1080,8 +1088,8 @@ class StereoChemValidator:
                 "res_name2": res_names[idx2],
                 "chain_id2": self._uni_chain_id[idx2],
                 "res_id2": self._res_id[idx2],
-                "atom_name1": atom_names[idx1],
-                "atom_name2": atom_names[idx2],
+                "atom_name1": self._atom_name[idx1],
+                "atom_name2": self._atom_name[idx2],
                 "element1": elements[idx1],
                 "element2": elements[idx2],
                 "distance": dist_clash,

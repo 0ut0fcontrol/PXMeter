@@ -231,9 +231,6 @@ class MMCIFParser:
             chain_mask = entity_poly_seq.entity_id == entity_id
             seq_mon_ids = entity_poly_seq.mon_id[chain_mask].to_numpy(dtype=str)
 
-            # replace all MSE to MET in _entity_poly_seq.mon_id
-            seq_mon_ids[seq_mon_ids == "MSE"] = "MET"
-
             seq_nums = entity_poly_seq.num[chain_mask].to_numpy(dtype=int)
 
             if np.unique(seq_nums).size == seq_nums.size:

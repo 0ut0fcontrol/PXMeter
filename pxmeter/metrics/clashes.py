@@ -45,44 +45,65 @@ def check_clashes_by_vdw(
         # no query atoms, return empty list
         return []
 
-    if query_mask is None:
-        query_mask = np.ones(len(atom_array), dtype=bool)
+    # Pre-calculate VDW radii, default to 1.7 (radius of Carbon) if undefined
+    vdw_radii = np.array([vdw_radius_single(e) or 1.7 for e in atom_array.element])
 
-    query_idx_in_ref = np.where(query_mask)[0]
-
-    vdw_radii = np.array([vdw_radius_single(e) for e in atom_array.element])
-    query_vdw_radii = vdw_radii[query_mask]
-
-    clashes = []
+    # Build KDTree and find all pairs within 3.0A
     query_tree = KDTree(atom_array.coord)
-    for query_idx, nbs_idx in enumerate(
-        query_tree.query_ball_point(atom_array.coord[query_mask], r=3.0)
-    ):
-        query_bonds, _query_bond_types = atom_array.bonds.get_bonds(
-            query_idx_in_ref[query_idx]
-        )
-        query_vdw = query_vdw_radii[query_idx]
-        if query_vdw is None:
-            # undefined vdw for elem, use 1.7 as "C"
-            query_vdw = vdw_radius_single("C")
+    # query_pairs returns (i, j) with i < j
+    pairs = query_tree.query_pairs(3.0)
+    pairs = np.array(list(pairs))
 
-        for nb_idx in nbs_idx:
-            if query_idx_in_ref[query_idx] == nb_idx:
-                # clash with self
-                continue
+    if pairs.size == 0:
+        return []
 
-            if nb_idx in query_bonds:
-                # clash with bonded atoms
-                continue
+    i = pairs[:, 0]
+    j = pairs[:, 1]
 
-            nb_vdw = vdw_radii[nb_idx]
-            if nb_vdw is None:
-                # undefined vdw for elem, use 1.7 as "C"
-                nb_vdw = vdw_radius_single("C")
+    # Matching original logic: a pair (i, j) is checked if the "source" atom is in query_mask.
+    # In original loop, if i is in query_mask, it checks all neighbors j.
+    # So we need both (i, j) and (j, i) if they satisfy the query_mask condition.
+    all_candidate_pairs = []
+    # Pairs where i is in query_mask
+    mask_i = query_mask[i]
+    if np.any(mask_i):
+        all_candidate_pairs.append(pairs[mask_i])
+    # Pairs where j is in query_mask (add as (j, i))
+    mask_j = query_mask[j]
+    if np.any(mask_j):
+        all_candidate_pairs.append(pairs[mask_j][:, [1, 0]])
 
-            dist = np.linalg.norm(
-                atom_array.coord[query_mask][query_idx] - atom_array.coord[nb_idx]
-            )
-            if dist < vdw_scale_factor * (query_vdw + nb_vdw):
-                clashes.append((query_idx_in_ref[query_idx], nb_idx))
-    return clashes
+    if not all_candidate_pairs:
+        return []
+
+    directed_pairs = np.concatenate(all_candidate_pairs, axis=0)
+
+    # Filter out bonded pairs
+    # Get all bonds as (min, max) for easy lookup
+    bonds = atom_array.bonds.as_array()[:, :2]
+    # Use a set of tuples for fast lookup.
+    # For large structures, we can use a more efficient way if needed.
+    bond_set = set(map(tuple, bonds))
+    bond_set.update(set(map(tuple, bonds[:, [1, 0]])))
+
+    # Filter
+    is_bonded = np.array([(p[0], p[1]) in bond_set for p in directed_pairs])
+    directed_pairs = directed_pairs[~is_bonded]
+
+    if directed_pairs.size == 0:
+        return []
+
+    # Final check with distances and VDW sum
+    a1 = directed_pairs[:, 0]
+    a2 = directed_pairs[:, 1]
+
+    # Vectorized distance calculation
+    diff = atom_array.coord[a1] - atom_array.coord[a2]
+    dist = np.linalg.norm(diff, axis=1)
+
+    vdw_sum = vdw_radii[a1] + vdw_radii[a2]
+    is_clash = dist < vdw_scale_factor * vdw_sum
+
+    clash_pairs = directed_pairs[is_clash]
+
+    return [tuple(p) for p in clash_pairs]

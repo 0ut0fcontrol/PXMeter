@@ -59,6 +59,24 @@ class LDDT:
         )
 
         self.lddt_atom_pair = self.compute_lddt_atom_pair()
+        model_dist_all, ref_dist_all = self._calc_sparse_dist(
+            self.lddt_atom_pair[:, 0], self.lddt_atom_pair[:, 1]
+        )
+        dist_err_all = np.abs(model_dist_all - ref_dist_all)
+        # [N_pairs, 4]
+        per_thr_scores_all = np.stack(
+            [dist_err_all < t for t in self.lddt_thresholds], axis=-1
+        ).astype(float)
+
+        if self.model_atom_mask is not None:
+            l_idx = self.lddt_atom_pair[:, 0]
+            m_idx = self.lddt_atom_pair[:, 1]
+            pair_valid_mask_all = (
+                self.model_atom_mask[l_idx] & self.model_atom_mask[m_idx]
+            )
+            per_thr_scores_all *= pair_valid_mask_all[:, None]
+
+        self.per_pair_lddt_all = np.mean(per_thr_scores_all, axis=-1)
 
     def _get_model_stereo_valid_atom_mask(self) -> np.ndarray:
         checker = StereoChemValidator(
@@ -73,19 +91,21 @@ class LDDT:
         ref_coords: np.ndarray,
         radius: float,
         subset_mask: np.ndarray,
-    ) -> set[tuple[int, int]]:
-        result_pairs = []
+    ) -> np.ndarray:
         subset_index = np.nonzero(subset_mask)[0]
         indices = kdtree.query_ball_point(ref_coords[subset_mask], r=radius)
-        for idx, j_list in enumerate(indices):
-            i = subset_index[idx]
-            for j in j_list:
-                if i != j:
-                    result_pairs.append((i, j))
-        result_pairs = set(result_pairs)
-        return result_pairs
 
-    def compute_lddt_atom_pair(self) -> tuple[np.ndarray]:
+        lens = [len(j_list) for j_list in indices]
+        i_indices = np.repeat(subset_index, lens)
+
+        if len(indices) == 0 or sum(lens) == 0:
+            return np.zeros((0, 2), dtype=int)
+
+        j_indices = np.concatenate(indices)
+        mask = i_indices != j_indices
+        return np.stack([i_indices[mask], j_indices[mask]], axis=1)
+
+    def compute_lddt_atom_pair(self) -> np.ndarray:
         """
         Calculate the atom pair mask with the bespoke radius
 
@@ -100,67 +120,43 @@ class LDDT:
 
         # Restrict to bespoke inclusion radius
         kdtree = KDTree(ref_coords)
-        atom_pairs = set()
 
+        all_pairs = []
         if np.any(is_nuc):
-            nuc_pairs = LDDT._get_pair_from_kdtree(
-                kdtree,
-                ref_coords,
-                radius=self.is_nucleotide_threshold,
-                subset_mask=is_nuc,
+            all_pairs.append(
+                LDDT._get_pair_from_kdtree(
+                    kdtree,
+                    ref_coords,
+                    radius=self.is_nucleotide_threshold,
+                    subset_mask=is_nuc,
+                )
             )
-            atom_pairs |= nuc_pairs
 
         if np.any(~is_nuc):
-            non_nuc_pairs = LDDT._get_pair_from_kdtree(
-                kdtree,
-                ref_coords,
-                radius=self.is_not_nucleotide_threshold,
-                subset_mask=~is_nuc,
+            all_pairs.append(
+                LDDT._get_pair_from_kdtree(
+                    kdtree,
+                    ref_coords,
+                    radius=self.is_not_nucleotide_threshold,
+                    subset_mask=~is_nuc,
+                )
             )
-            atom_pairs |= non_nuc_pairs
 
-        assert atom_pairs, "No atom pairs found for LDDT calculation."
-        atom_pairs = np.array(list(atom_pairs))
+        if not all_pairs:
+            raise ValueError("No atom pairs found for LDDT calculation.")
+
+        atom_pairs = np.concatenate(all_pairs, axis=0)
+
         return atom_pairs
 
     def _calc_lddt(
         self,
-        model_dist_sparse_lm: np.ndarray,
-        ref_dist_sparse_lm: np.ndarray,
-        pair_valid_mask: Optional[np.ndarray] = None,
+        pair_indices: np.ndarray,
     ) -> float:
         """
-        Calculate LDDT scores from predicted and true atom pair distances.
-
-        Args:
-            model_dist_sparse_lm: [N_pair_sparse] Distances between atom pairs in model structure.
-            ref_dist_sparse_lm: [N_pair_sparse] Distances between atom pairs in reference structure.
-            pair_valid_mask: [N_pair_sparse] Optional boolean mask. Pairs with False will get
-                LDDT score 0 but still be counted in the mean.
-
-        Returns:
-            float: LDDT scores ranging 0-1
+        Calculate LDDT scores from pre-calculated per-pair scores.
         """
-        distance_error_l1 = np.abs(
-            model_dist_sparse_lm - ref_dist_sparse_lm
-        )  # [N_pair_sparse]
-
-        per_thr_scores = np.stack(
-            [distance_error_l1 < t for t in self.lddt_thresholds], axis=-1
-        ).astype(
-            float
-        )  # [N_pair_sparse, 4]
-
-        if pair_valid_mask is not None:
-            # Zero out all threshold scores for invalid pairs
-            per_thr_scores = per_thr_scores * pair_valid_mask[:, None]
-
-        sparse_pair_lddt = np.mean(per_thr_scores, axis=-1)
-
-        # Compute mean
-        lddt = np.mean(sparse_pair_lddt)
-        return lddt
+        return np.mean(self.per_pair_lddt_all[pair_indices])
 
     def _calc_sparse_dist(
         self,
@@ -197,13 +193,13 @@ class LDDT:
 
         return model_dist_sparse_lm, ref_dist_sparse_lm
 
-    def _get_lddt_atom_pair_for_chain_mask(
+    def _get_lddt_atom_pair_indices_for_chain_mask(
         self,
         chain_1_mask: np.ndarray,
         chain_2_mask: np.ndarray,
     ) -> np.ndarray:
         """
-        Get atom pair mask for chain interface evaluation.
+        Get atom pair indices for chain interface evaluation.
         If the evaluation is for a single chain, the chain_2_mask is the same as the chain_1_mask.
 
         Args:
@@ -212,44 +208,32 @@ class LDDT:
             chain_2_mask (np.ndarray): [N_atom] Atom mask for chain 2.
 
         Returns:
-            np.ndarray: Atom pair mask for chain / interface evaluation [N_pair_sparse]
+            np.ndarray: Atom pair indices for chain / interface evaluation [N_pair_interface]
         """
-        chain_1_index = np.nonzero(chain_1_mask)[0]
-        chain_2_index = np.nonzero(chain_2_mask)[0]
+        # Optimized: use boolean indexing
+        idx_i = self.lddt_atom_pair[:, 0]
+        idx_j = self.lddt_atom_pair[:, 1]
 
-        mask1 = np.isin(self.lddt_atom_pair[:, 0], chain_1_index) & np.isin(
-            self.lddt_atom_pair[:, 1], chain_2_index
-        )
-        mask2 = np.isin(self.lddt_atom_pair[:, 0], chain_2_index) & np.isin(
-            self.lddt_atom_pair[:, 1], chain_1_index
-        )
-        assert np.any(
-            mask1 | mask2
-        ), "No atom pair found for chain / interface evaluation."
-        interface_atom_pair = self.lddt_atom_pair[mask1 | mask2]
-        return interface_atom_pair
+        mask1 = chain_1_mask[idx_i] & chain_2_mask[idx_j]
+        mask2 = chain_2_mask[idx_i] & chain_1_mask[idx_j]
 
-    def _apply_atom_mask_to_pairs(
+        return np.where(mask1 | mask2)[0]
+
+    def _apply_atom_mask_to_pair_indices(
         self,
-        l_index: np.ndarray,
-        m_index: np.ndarray,
+        pair_indices: np.ndarray,
         atom_mask: Optional[np.ndarray],
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> np.ndarray:
         """
         Apply an atom-level mask to atom pair indices.
-
-        Only keep pairs where both atoms are True in ``atom_mask``.
-        If ``atom_mask`` is None, the indices are returned unchanged.
-        If no pairs are left after applying the mask, empty arrays are returned.
         """
         if atom_mask is None:
-            return l_index, m_index
+            return pair_indices
 
+        l_index = self.lddt_atom_pair[pair_indices, 0]
+        m_index = self.lddt_atom_pair[pair_indices, 1]
         pair_subset = atom_mask[l_index] & atom_mask[m_index]
-        if not np.any(pair_subset):
-            # Let the caller decide how to handle "no valid pairs".
-            return l_index[:0], m_index[:0]
-        return l_index[pair_subset], m_index[pair_subset]
+        return pair_indices[pair_subset]
 
     def run(
         self,
@@ -293,69 +277,36 @@ class LDDT:
                 combined_atom_mask = combined_atom_mask & self.model_atom_mask
 
         if not eval_chain_interface:
-            l_index = self.lddt_atom_pair[:, 0]
-            m_index = self.lddt_atom_pair[:, 1]
+            pair_indices = np.arange(len(self.lddt_atom_pair))
 
             # If we have an atom-level mask, restrict to pairs where both atoms are valid.
-            l_index, m_index = self._apply_atom_mask_to_pairs(
-                l_index, m_index, combined_atom_mask
+            pair_indices = self._apply_atom_mask_to_pair_indices(
+                pair_indices, combined_atom_mask
             )
 
             # If no pairs remain after applying the atom_mask, return NaN.
-            if l_index.size == 0:
+            if pair_indices.size == 0:
                 return float("nan")
 
-            model_dist_sparse_lm, ref_dist_sparse_lm = self._calc_sparse_dist(
-                l_index, m_index
-            )
-
-            pair_valid_mask = None
-            # Stereochemistry mask still works in the original way: invalid pairs
-            # contribute 0 but are counted in the mean.
-            if self.model_atom_mask is not None:
-                pair_valid_mask = (
-                    self.model_atom_mask[l_index] & self.model_atom_mask[m_index]
-                )
-
-            lddt_value = self._calc_lddt(
-                model_dist_sparse_lm,
-                ref_dist_sparse_lm,
-                pair_valid_mask=pair_valid_mask,
-            )
+            lddt_value = self._calc_lddt(pair_indices)
         else:
             n_eval = chain_1_masks.shape[0]
             lddt_value = []  # [N_eval]
             for i in range(n_eval):
-                interface_atom_pair = self._get_lddt_atom_pair_for_chain_mask(
+                pair_indices = self._get_lddt_atom_pair_indices_for_chain_mask(
                     chain_1_masks[i], chain_2_masks[i]
                 )
-                l_index = interface_atom_pair[:, 0]
-                m_index = interface_atom_pair[:, 1]
 
-                l_index, m_index = self._apply_atom_mask_to_pairs(
-                    l_index, m_index, combined_atom_mask
+                pair_indices = self._apply_atom_mask_to_pair_indices(
+                    pair_indices, combined_atom_mask
                 )
 
-                if l_index.size == 0:
+                if pair_indices.size == 0:
                     # No valid pairs for this interface after applying atom_mask.
                     lddt_value_i = float("nan")
                     lddt_value.append(lddt_value_i)
                     continue
 
-                model_dist_sparse_lm, ref_dist_sparse_lm = self._calc_sparse_dist(
-                    l_index, m_index
-                )
-
-                pair_valid_mask = None
-                if self.model_atom_mask is not None:
-                    pair_valid_mask = (
-                        self.model_atom_mask[l_index] & self.model_atom_mask[m_index]
-                    )
-
-                lddt_value_i = self._calc_lddt(
-                    model_dist_sparse_lm,
-                    ref_dist_sparse_lm,
-                    pair_valid_mask=pair_valid_mask,
-                )
+                lddt_value_i = self._calc_lddt(pair_indices)
                 lddt_value.append(lddt_value_i)
         return lddt_value

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 
-from pxmeter.constants import DNA, LIGAND, PROTEIN, RNA
+from pxmeter.constants import DNA, LIGAND, PROTEIN, PROTEIN_D, RNA
 from pxmeter.input_builder.seq import (
     Bond,
     LigandChainSequence,
@@ -81,7 +81,7 @@ class ProtenixEntity:
                 "sequence": self.sequence.sequence,
                 "count": self.count,
             }
-            if self.sequence.entity_type == PROTEIN:
+            if self.sequence.entity_type in [PROTEIN, PROTEIN_D]:
                 # # U -> SEC -> CYS -> C
                 entity_dict["sequence"] = entity_dict["sequence"].replace("U", "C")
 

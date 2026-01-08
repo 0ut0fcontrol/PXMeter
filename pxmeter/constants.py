@@ -14,10 +14,11 @@
 
 # _entity_poly.type
 PROTEIN = "polypeptide(L)"
+PROTEIN_D = "polypeptide(D)"
 DNA = "polydeoxyribonucleotide"
 RNA = "polyribonucleotide"
 LIGAND = "ligand"  # non-polymer
-POLYMER = [PROTEIN, DNA, RNA]
+POLYMER = [PROTEIN, PROTEIN_D, DNA, RNA]
 
 CRYSTALLIZATION_AIDS = (
     "SO4", "GOL", "EDO", "PO4", "ACT", "PEG", "DMS", "TRS", "PGE", "PG4",

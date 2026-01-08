@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Union
 
-from pxmeter.constants import DNA, LIGAND, PROTEIN, RNA
+from pxmeter.constants import DNA, LIGAND, PROTEIN, PROTEIN_D, RNA
 from pxmeter.input_builder.seq import (
     Bond,
     LigandChainSequence,
@@ -77,7 +77,7 @@ class AlpahFold3Input:
                 "sequence": sequence.sequence,
                 "id": entity_chain_ids,
             }
-            if sequence.entity_type == PROTEIN:
+            if sequence.entity_type in {PROTEIN, PROTEIN_D}:
                 if sequence.modifications:
                     modifications = []
                     entity_seq = copy.deepcopy(sequence.sequence)

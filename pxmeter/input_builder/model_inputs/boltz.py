@@ -20,7 +20,7 @@ from typing import Union
 
 import yaml
 
-from pxmeter.constants import DNA, LIGAND, PROTEIN, RNA
+from pxmeter.constants import DNA, LIGAND, PROTEIN, PROTEIN_D, RNA
 from pxmeter.input_builder.seq import (
     Bond,
     LigandChainSequence,
@@ -57,6 +57,7 @@ class BoltzInput:
         """
         entity_type_mapping = {
             PROTEIN: "protein",
+            PROTEIN_D: "protein",
             RNA: "rna",
             DNA: "dna",
             LIGAND: "ligand",

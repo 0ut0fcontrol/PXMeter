@@ -17,10 +17,14 @@ import functools
 import logging
 from typing import Any
 
+import biotite.structure.info as info
+import gemmi
 import numpy as np
 from biotite.interface.rdkit import to_mol
 from biotite.structure import AtomArray, get_residue_starts
 from biotite.structure.info import get_from_ccd, residue
+from biotite.structure.io.pdbx import CIFBlock, CIFCategory, CIFFile
+from pdbeccdutils.core import ccd_reader
 from rdkit import Chem
 from rdkit.Geometry import Point3D
 
@@ -68,6 +72,58 @@ def get_ccd_mol_from_cif(ccd_code: str) -> Chem.Mol:
     return mol
 
 
+def extract_residue_cif(ccd_code: str) -> str:
+    """
+    Extract the CIF string for a given CCD code.
+
+    Args:
+        ccd_code (str): The CCD code of the molecule to extract.
+
+    Returns:
+        str: The CIF string corresponding to the given CCD code.
+             Returns None if the CCD code is not found.
+    """
+    categories = ["chem_comp", "chem_comp_atom", "chem_comp_bond"]
+
+    block_dict = {}
+    for cat_name in categories:
+        cat = info.get_from_ccd(cat_name, ccd_code)
+        if cat is not None:
+            block_dict[cat_name] = CIFCategory(
+                {k: v.as_array() for k, v in cat.items()}
+            )
+
+    if not block_dict:
+        return None
+
+    block = CIFBlock(block_dict)
+    return str(CIFFile({ccd_code: block}))
+
+
+@functools.lru_cache(maxsize=1024)
+def get_ccd_mol_from_gemmi(ccd_code: str) -> Chem.Mol:
+    """
+    Retrieve a molecular object from a CCD CIF string by
+    parsing it with gemmi and pdbeccdutils.
+
+    Args:
+        ccd_code (str): The CCD code of the molecule to retrieve.
+
+    Returns:
+        Chem.Mol: The RDKit molecule object with an 'atom_map' property.
+                  Returns None if the CCD code is not found or parsing fails.
+    """
+    cif_str = extract_residue_cif(ccd_code)
+    if cif_str is None:
+        return None
+    ccd_block = gemmi.cif.read_string(cif_str)[0]
+
+    result = ccd_reader._parse_pdb_mmcif(ccd_block, sanitize=True)
+    mol = result.component.mol
+    mol.atom_map = {a.GetProp("name"): a.GetIdx() for a in mol.GetAtoms()}
+    return mol
+
+
 def get_ccd_mol_by_atom_names(ccd_code: str, atom_names: list[str] = None) -> Chem.Mol:
     """
     Get a mol from a CCD code.
@@ -82,17 +138,8 @@ def get_ccd_mol_by_atom_names(ccd_code: str, atom_names: list[str] = None) -> Ch
     Returns:
         Chem.Mol: A rdkit mol of the CCD code, with the atom property "atom_name".
     """
-    mol = copy.deepcopy(get_ccd_mol_from_cif(ccd_code))
-
-    # Convert explicit Hs to implicit Hs to ensure
-    # correct valency and aromaticity perception
-    mol = Chem.RemoveHs(mol)
-
-    # Reset atom_map after removing Hs
-    mol.atom_map = {
-        atom.GetPDBResidueInfo().GetName(): atom.GetIdx() for atom in mol.GetAtoms()
-    }
-
+    mol = copy.deepcopy(get_ccd_mol_from_gemmi(ccd_code))
+    assert mol is not None, f"Failed to get mol from CCD code {ccd_code}"
     atom_name_to_idx = mol.atom_map
     idx_to_atom_name = {v: k for k, v in atom_name_to_idx.items()}
 
@@ -111,17 +158,6 @@ def get_ccd_mol_by_atom_names(ccd_code: str, atom_names: list[str] = None) -> Ch
     for atom_idx in atoms_to_remove:
         edit_mol.RemoveAtom(atom_idx)
     new_mol = edit_mol.GetMol()
-
-    try:
-        new_mol.UpdatePropertyCache(strict=False)
-        # Attempt to sanitize but skip kekulization
-        # if it's already aromatic or has issues
-        Chem.SanitizeMol(
-            new_mol, sanitizeOps=Chem.SANITIZE_ALL ^ Chem.SANITIZE_KEKULIZE
-        )
-    except Exception:
-        pass
-
     return new_mol
 
 

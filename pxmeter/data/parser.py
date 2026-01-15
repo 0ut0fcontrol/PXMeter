@@ -16,7 +16,7 @@ import copy
 import functools
 import gzip
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Optional, Sequence, Union
 
@@ -30,8 +30,206 @@ from biotite.structure import (
     get_residue_starts,
 )
 from biotite.structure.io.pdbx.component import MaskValue
+from biotite.structure.io.pdbx.convert import (
+    _apply_transformations,
+    _get_block,
+    _get_transformations,
+    _parse_operation_expression,
+    concatenate,
+    get_structure,
+    InvalidFileError,
+)
 
 from pxmeter.data.ccd import get_ccd_one_letter_code
+
+
+def get_assembly(
+    pdbx_file,
+    assembly_id=None,
+    model=None,
+    data_block=None,
+    altloc="first",
+    extra_fields=None,
+    use_author_fields=True,
+    include_bonds=False,
+):
+    """
+    This code is copied from a Biotite fix commit, as Biotite versions between
+    v1.2.0 and v1.5.0 lose inter-chain bonds in the get_assembly function.
+    https://github.com/biotite-dev/biotite/issues/838
+
+    Build the given biological assembly.
+
+    This function receives the data from the
+    ``pdbx_struct_assembly_gen``, ``pdbx_struct_oper_list`` and
+    ``atom_site`` categories in the file.
+    Consequently, these categories must be present in the file.
+
+    Parameters
+    ----------
+    pdbx_file : CIFFile or CIFBlock or BinaryCIFFile or BinaryCIFBlock
+        The file object.
+    assembly_id : str
+        The assembly to build.
+        Available assembly IDs can be obtained via
+        :func:`list_assemblies()`.
+    model : int, optional
+        If this parameter is given, the function will return an
+        :class:`AtomArray` from the atoms corresponding to the given
+        model number (starting at 1).
+        Negative values are used to index models starting from the last
+        model insted of the first model.
+        If this parameter is omitted, an :class:`AtomArrayStack`
+        containing all models will be returned, even if the structure
+        contains only one model.
+    data_block : str, optional
+        The name of the data block.
+        Default is the first (and most times only) data block of the
+        file.
+        If the data block object is passed directly to `pdbx_file`,
+        this parameter is ignored.
+    altloc : {'first', 'occupancy', 'all'}
+        This parameter defines how *altloc* IDs are handled:
+            - ``'first'`` - Use atoms that have the first *altloc* ID
+              appearing in a residue.
+            - ``'occupancy'`` - Use atoms that have the *altloc* ID
+              with the highest occupancy for a residue.
+            - ``'all'`` - Use all atoms.
+              Note that this leads to duplicate atoms.
+              When this option is chosen, the ``altloc_id`` annotation
+              array is added to the returned structure.
+    extra_fields : list of str, optional
+        The strings in the list are entry names, that are
+        additionally added as annotation arrays.
+        The annotation category name will be the same as the PDBx
+        subcategory name.
+        The array type is always `str`.
+        An exception are the special field identifiers:
+        ``'atom_id'``, ``'b_factor'``, ``'occupancy'`` and ``'charge'``.
+        These will convert the fitting subcategory into an
+        annotation array with reasonable type.
+    use_author_fields : bool, optional
+        Some fields can be read from two alternative sources,
+        for example both, ``label_seq_id`` and ``auth_seq_id`` describe
+        the ID of the residue.
+        While, the ``label_xxx`` fields can be used as official pointers
+        to other categories in the file, the ``auth_xxx``
+        fields are set by the author(s) of the structure and are
+        consistent with the corresponding values in PDB files.
+        If `use_author_fields` is true, the annotation arrays will be
+        read from the ``auth_xxx`` fields (if applicable),
+        otherwise from the the ``label_xxx`` fields.
+    include_bonds : bool, optional
+        If set to true, a :class:`BondList` will be created for the
+        resulting :class:`AtomArray` containing the bond information
+        from the file.
+        Inter-residue bonds, will be read from the ``struct_conn``
+        category.
+        Intra-residue bonds will be read from the ``chem_comp_bond``, if
+        available, otherwise they will be derived from the Chemical
+        Component Dictionary.
+
+    Returns
+    -------
+    assembly : AtomArray or AtomArrayStack
+        The assembly.
+        The return type depends on the `model` parameter.
+        Contains the `sym_id` annotation, which enumerates the copies of the asymmetric
+        unit in the assembly.
+
+    Examples
+    --------
+
+    >>> import os.path
+    >>> file = CIFFile.read(os.path.join(path_to_structures, "1f2n.cif"))
+    >>> assembly = get_assembly(file, model=1)
+    """
+    block = _get_block(pdbx_file, data_block)
+
+    try:
+        assembly_gen_category = block["pdbx_struct_assembly_gen"]
+    except KeyError:
+        raise InvalidFileError("File has no 'pdbx_struct_assembly_gen' category")
+
+    try:
+        struct_oper_category = block["pdbx_struct_oper_list"]
+    except KeyError:
+        raise InvalidFileError("File has no 'pdbx_struct_oper_list' category")
+
+    assembly_ids = assembly_gen_category["assembly_id"].as_array(str)
+    if assembly_id is None:
+        assembly_id = assembly_ids[0]
+    elif assembly_id not in assembly_ids:
+        raise KeyError(f"File has no Assembly ID '{assembly_id}'")
+
+    ### Calculate all possible transformations
+    transformations = _get_transformations(struct_oper_category)
+
+    ### Get structure according to additional parameters
+    # Include 'label_asym_id' as annotation array
+    # for correct asym ID filtering
+    extra_fields = [] if extra_fields is None else extra_fields
+    if "label_asym_id" in extra_fields:
+        extra_fields_and_asym = extra_fields
+    else:
+        # The operations apply on asym IDs
+        # -> they need to be included to select the correct atoms
+        extra_fields_and_asym = extra_fields + ["label_asym_id"]
+    structure = get_structure(
+        pdbx_file,
+        model,
+        data_block,
+        altloc,
+        extra_fields_and_asym,
+        use_author_fields,
+        include_bonds,
+    )
+
+    ### Get transformations and apply them to the affected asym IDs
+    sub_assemblies = []
+    sym_id_counter = Counter()
+    for id, op_expr, asym_id_expr in zip(
+        assembly_gen_category["assembly_id"].as_array(str),
+        assembly_gen_category["oper_expression"].as_array(str),
+        assembly_gen_category["asym_id_list"].as_array(str),
+    ):
+        # Find the operation expressions for given assembly ID
+        # We already asserted that the ID is actually present
+        if id == assembly_id:
+            chain_ids = asym_id_expr.split(",")
+            operations = _parse_operation_expression(op_expr)
+            sub_structure = structure[..., np.isin(structure.label_asym_id, chain_ids)]
+            sub_assembly = _apply_transformations(
+                sub_structure, transformations, operations
+            )
+
+            # Add 'sym_id' annotation, that should increment for each 'oper_expression'
+            sub_assembly.set_annotation(
+                "sym_id",
+                np.repeat(np.arange(len(operations)), sub_structure.array_length()),
+            )
+            # As different 'oper_expression's may comprise different chains
+            # increment the 'sym_id' individually for each chain
+            for chain_id in chain_ids:
+                chain_mask = sub_assembly.label_asym_id == chain_id
+                sub_assembly.sym_id[chain_mask] += sym_id_counter[chain_id]
+                sym_id_counter[chain_id] += len(operations)
+
+            sub_assemblies.append(sub_assembly)
+    assembly = concatenate(sub_assemblies)
+
+    # Sort AtomArray or AtomArrayStack by 'sym_id'
+    max_sym_id = assembly.sym_id.max()
+    assembly = concatenate(
+        [assembly[..., assembly.sym_id == sym_id] for sym_id in range(max_sym_id + 1)]
+    )
+
+    # Remove 'label_asym_id', if it was not included in the original
+    # user-supplied 'extra_fields'
+    if "label_asym_id" not in extra_fields:
+        assembly.del_annotation("label_asym_id")
+
+    return assembly
 
 
 class MMCIFParser:
@@ -374,7 +572,7 @@ class MMCIFParser:
                 include_bonds=include_bonds,
             )
         else:
-            atom_array = pdbx.get_assembly(
+            atom_array = get_assembly(
                 pdbx_file=self.cif,
                 assembly_id=assembly_id,
                 model=model,

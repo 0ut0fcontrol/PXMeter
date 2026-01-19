@@ -20,6 +20,7 @@ from typing import Optional, Union
 import numpy as np
 from biotite.interface.rdkit import to_mol
 from biotite.structure.info import residue
+from biotite.structure.io.pdbx.convert import PDBX_BOND_TYPE_ID_TO_TYPE
 from rdkit import Chem
 
 from pxmeter.constants import LIGAND, POLYMER, STD_RESIDUES
@@ -453,11 +454,18 @@ class Sequences:
         structure: Structure,
         seqs_lst: list[Union[PolymerChainSequence, LigandChainSequence]],
         keep_polymer_crosslinks: bool = False,
+        remove_metalc: bool = True,
     ) -> tuple[Bond]:
         # Map ori_chain_id to chain_index
         ori_chain_id_to_index = {seq.ori_chain_id: i for i, seq in enumerate(seqs_lst)}
 
         bond_array = structure.atom_array.bonds.as_array()
+
+        if remove_metalc:
+            biotite_metalc_type = PDBX_BOND_TYPE_ID_TO_TYPE["metalc"]
+            bond_mask = bond_array[:, 2] != biotite_metalc_type
+            bond_array = bond_array[bond_mask]
+
         is_polymer = structure.get_mask_for_given_entity_types(entity_types=POLYMER)
         chain_id = structure.uni_chain_id
         res_id = structure.atom_array.res_id
@@ -557,7 +565,7 @@ class Sequences:
         all_seqs = polymer_seqs + non_polymer_seqs
 
         bonds = Sequences._get_bonds_from_structure(
-            structure, all_seqs, keep_polymer_crosslinks=False
+            structure, all_seqs, keep_polymer_crosslinks=False, remove_metalc=True
         )
         return cls(name=structure.entry_id, sequences=tuple(all_seqs), bonds=bonds)
 

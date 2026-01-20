@@ -67,7 +67,7 @@ class ChainPermutation:
     @staticmethod
     def find_bonded_position_for_lig_chains(
         struct: Structure,
-    ) -> dict[str, tuple[str, int]]:
+    ) -> dict[str, list[tuple[str, int]]]:
         """
         Find the bonded entity ID and residue ID for ligand chains.
 
@@ -75,7 +75,7 @@ class ChainPermutation:
             struct (Structure): Structure object.
 
         Returns:
-            dict[str, tuple[str, int]]: Mapping of ligand chain ID to bonded
+            dict[str, list[tuple[str, int]]]: Mapping of ligand chain ID to bonded
                                         entity ID and residue ID.
         """
         ligand_polymer_bonds = struct.get_ligand_polymer_bonds()
@@ -92,38 +92,54 @@ class ChainPermutation:
                 lig_chain_id = struct.uni_chain_id[atom2]
                 entity_id = struct.atom_array.label_entity_id[atom1]
                 res_id = struct.atom_array.res_id[atom1]
-            chain_id_to_bonded_position[lig_chain_id] = (entity_id, res_id)
+
+            if lig_chain_id not in chain_id_to_bonded_position:
+                chain_id_to_bonded_position[lig_chain_id] = []
+            if (entity_id, res_id) not in chain_id_to_bonded_position[lig_chain_id]:
+                chain_id_to_bonded_position[lig_chain_id].append((entity_id, res_id))
         return chain_id_to_bonded_position
 
     def _get_ban_set_by_lig_bonded_position(
         self,
     ) -> set[tuple[str, str]]:
-        ref_chain_id_to_bond_position = (
+        ref_chain_id_to_bond_positions = (
             ChainPermutation.find_bonded_position_for_lig_chains(self.ref_struct)
         )
-        model_chain_id_to_bond_position = (
+        model_chain_id_to_bond_positions = (
             ChainPermutation.find_bonded_position_for_lig_chains(self.model_struct)
         )
 
         ban_set = set()
         for ref_chain_id in np.unique(self.ref_struct.uni_chain_id):
-            ref_bonded_entity, ref_bonded_res_id = ref_chain_id_to_bond_position.get(
-                ref_chain_id, ["-1", -1]
-            )
-            mapped_model_bonded_entity = self.ref_to_model_entity_id.get(
-                ref_bonded_entity, "-1"
-            )
+            ref_bonds = ref_chain_id_to_bond_positions.get(ref_chain_id, [])
+            ref_mapped_entities = {
+                self.ref_to_model_entity_id.get(r_ent, "-1")
+                for r_ent, r_res in ref_bonds
+            }
+            ref_mapped_entities.discard("-1")
 
             for model_chain_id in np.unique(self.model_struct.uni_chain_id):
-                (
-                    model_bonded_entity,
-                    model_bonded_res_id,
-                ) = model_chain_id_to_bond_position.get(model_chain_id, ["-1", -1])
+                model_bonds = model_chain_id_to_bond_positions.get(model_chain_id, [])
+                model_entities = {m_ent for m_ent, m_res in model_bonds}
 
-                if mapped_model_bonded_entity != "-1" and model_bonded_entity != "-1":
-                    if (mapped_model_bonded_entity != model_bonded_entity) or (
-                        ref_bonded_res_id != model_bonded_res_id
-                    ):
+                if ref_mapped_entities and model_entities:
+                    common_entities = ref_mapped_entities & model_entities
+                    if common_entities:
+                        # For each common entity, check if there is any residue ID overlap
+                        for ent in common_entities:
+                            ref_res_ids = {
+                                r_res
+                                for r_ent, r_res in ref_bonds
+                                if self.ref_to_model_entity_id.get(r_ent) == ent
+                            }
+                            model_res_ids = {
+                                m_res for m_ent, m_res in model_bonds if m_ent == ent
+                            }
+                            if not (ref_res_ids & model_res_ids):
+                                ban_set.add((ref_chain_id, model_chain_id))
+                                break
+                    else:
+                        # No common entities, both have bonds, so they should not map
                         ban_set.add((ref_chain_id, model_chain_id))
         return ban_set
 

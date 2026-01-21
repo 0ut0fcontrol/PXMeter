@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
 import dataclasses
 import json
 import logging
@@ -63,6 +62,8 @@ def compute_pb_valid(
         ref_lig_label_asym_ids = list(ref_lig_label_asym_id)
 
     df_list = []
+    buster = PoseBusters(config="redock")
+
     for lig_label_asym_id in ref_lig_label_asym_ids:
         lig_mask = ref_struct.atom_array.label_asym_id == lig_label_asym_id
 
@@ -70,13 +71,19 @@ def compute_pb_valid(
         model_lig_chain_id = model_struct.uni_chain_id[lig_mask][0]
 
         ref_lig_atom_array = ref_struct.atom_array[lig_mask]
-        model_lig_atom_array = copy.deepcopy(model_struct.atom_array[lig_mask])
+        model_lig_atom_array = model_struct.atom_array[lig_mask].copy()
         # reset res_name for model ligand atoms by ref Structure
         model_lig_atom_array.res_name = ref_lig_atom_array.res_name
-        model_cond_atom_array = model_struct.atom_array[~lig_mask]
+        model_cond_atom_array = model_struct.atom_array[~lig_mask].copy()
 
-        ref_lig_mol = get_ccd_mol_from_chain_atom_array(ref_lig_atom_array)
-        model_lig_mol = get_ccd_mol_from_chain_atom_array(model_lig_atom_array)
+        try:
+            ref_lig_mol = get_ccd_mol_from_chain_atom_array(ref_lig_atom_array)
+            model_lig_mol = get_ccd_mol_from_chain_atom_array(model_lig_atom_array)
+        except Exception:
+            logging.warning(
+                f"Failed to create RDKit molecule for ligand {lig_label_asym_id}. Skipping PoseBusters."
+            )
+            continue
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_dir = Path(tmp_dir)
@@ -93,26 +100,34 @@ def compute_pb_valid(
             sdf_writer.close()
 
             pdb_file = pdb.PDBFile()
-            model_cond_atom_array = copy.deepcopy(model_cond_atom_array)
-            # PDB file only support one letter chain_id
-            model_cond_atom_array.chain_id = [
-                i[0] for i in model_cond_atom_array.chain_id
-            ]
+
+            # PDB file only support one letter chain_id, 3 letters res_name, 4 letters atom_name
+            model_cond_atom_array.chain_id = np.array(
+                [i[0] if len(i) > 0 else " " for i in model_cond_atom_array.chain_id],
+                dtype="U1",
+            )
+            model_cond_atom_array.res_name = np.array(
+                [i[:3] for i in model_cond_atom_array.res_name], dtype="U3"
+            )
+            model_cond_atom_array.atom_name = np.array(
+                [i[:4] for i in model_cond_atom_array.atom_name], dtype="U4"
+            )
+            model_cond_atom_array.bonds = None
+
             pdb_file.set_structure(model_cond_atom_array)
             pdb_file.write(model_cond_pdb)
 
-            buster = PoseBusters(config="redock")
             df = buster.bust(
                 mol_pred=model_lig_sdf,
                 mol_true=ref_lig_sdf,
                 mol_cond=model_cond_pdb,
                 full_report=True,
             )
-
             # record ligand chain id
             df["ref_lig_chain_id"] = ref_lig_chain_id
             df["model_lig_chain_id"] = model_lig_chain_id
             df_list.append(df)
+
     df_cat = pd.concat(df_list)
     return df_cat
 

@@ -395,6 +395,9 @@ class MappingCIF:
         Returns:
             Chem.Mol: The RDKit Mol object generated from the AtomArray.
         """
+        # Create a copy to avoid modifying the original atom_array's properties (e.g. truncated names)
+        atom_array = copy.deepcopy(atom_array)
+
         # PDB need an 1 character chain_id
         atom_array.chain_id = atom_array.chain_id.astype("<U1")
 
@@ -576,7 +579,7 @@ class MappingCIF:
         ):
             model_entity_id, ref_entity_id = model_and_ref_entity_id
 
-            if model_entity_id in model_to_ref_lig_simi_entity_id.keys():
+            if model_entity_id in model_to_ref_lig_simi_entity_id:
                 continue
             if ref_entity_id in model_to_ref_lig_simi_entity_id.values():
                 continue

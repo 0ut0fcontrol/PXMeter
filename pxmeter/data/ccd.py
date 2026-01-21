@@ -220,7 +220,20 @@ def get_ccd_mol_from_chain_atom_array(chain_atom_array: AtomArray) -> Chem.Mol:
         try:
             Chem.SanitizeMol(combo_mols)
         except Exception as e:
-            logging.warning(f"Could not sanitize mol(s): {e}")
+            logging.warning("Could not sanitize mol(s): %s", e)
+            for atom in combo_mols.GetAtoms():
+                atom.SetIsAromatic(False)
+            for bond in combo_mols.GetBonds():
+                if bond.GetIsAromatic():
+                    bond.SetIsAromatic(False)
+                    bond.SetBondType(Chem.rdchem.BondType.SINGLE)
+            try:
+                Chem.SanitizeMol(combo_mols)
+            except Exception as e2:
+                logging.warning(
+                    "Even after clearing aromaticity, could not sanitize mol(s): %s", e2
+                )
+
         combo_mols = _set_coord_by_chain_atom_array(
             mol=combo_mols, chain_atom_array=chain_atom_array
         )
@@ -251,7 +264,20 @@ def get_ccd_mol_from_chain_atom_array(chain_atom_array: AtomArray) -> Chem.Mol:
     try:
         Chem.SanitizeMol(new_mol)
     except Exception as e:
-        logging.warning(f"Could not sanitize new_mol: {e}")
+        logging.warning("Could not sanitize new_mol: %s", e)
+        for atom in new_mol.GetAtoms():
+            atom.SetIsAromatic(False)
+        for bond in new_mol.GetBonds():
+            if bond.GetIsAromatic():
+                bond.SetIsAromatic(False)
+                bond.SetBondType(Chem.rdchem.BondType.SINGLE)
+        try:
+            Chem.SanitizeMol(new_mol)
+        except Exception as e2:
+            logging.warning(
+                "Even after clearing aromaticity, could not sanitize new_mol: %s", e2
+            )
+
     new_mol = _set_coord_by_chain_atom_array(
         mol=new_mol, chain_atom_array=chain_atom_array
     )

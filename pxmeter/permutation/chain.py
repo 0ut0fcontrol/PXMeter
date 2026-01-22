@@ -493,9 +493,13 @@ class ChainPermutation:
 
         ref_uid_filtered = ref_uni_atom_id[ref_indices]
 
-        assert len(np.unique(ref_uid_filtered)) == len(
-            ref_uid_filtered
-        ), "Duplicate atoms in ref chain"
+        if len(np.unique(ref_uid_filtered)) != len(ref_uid_filtered):
+            logging.warning(
+                "Duplicate atoms in ref chain, only the first occurrence will be used for alignment."
+            )
+            _, unique_indices = np.unique(ref_uid_filtered, return_index=True)
+            ref_indices = ref_indices[unique_indices]
+            ref_uid_filtered = ref_uid_filtered[unique_indices]
 
         uid_index_map = {value: idx for idx, value in enumerate(ref_uid_filtered)}
 
@@ -505,13 +509,21 @@ class ChainPermutation:
         # Sort model indices based on ref indices
         model_uid_filtered = model_uni_atom_id[model_indices_unsorted]
 
-        assert len(np.unique(model_uid_filtered)) == len(
-            model_uid_filtered
-        ), "Duplicate atoms in model chain"
+        if len(np.unique(model_uid_filtered)) != len(model_uid_filtered):
+            logging.warning(
+                "Duplicate atoms in model chain, only the first occurrence will be used for alignment."
+            )
+            _, unique_indices = np.unique(model_uid_filtered, return_index=True)
+            model_indices_unsorted = model_indices_unsorted[unique_indices]
+            model_uid_filtered = model_uid_filtered[unique_indices]
 
         model_indices = model_indices_unsorted[
             np.argsort(np.vectorize(uid_index_map.get)(model_uid_filtered))
         ]
+
+        assert len(ref_indices) == len(
+            model_indices
+        ), f"Aligned atom counts do not match: ref {len(ref_indices)}, model {len(model_indices)}"
         return ref_indices, model_indices
 
     def find_ref_to_model_optimal_chain_mapping(

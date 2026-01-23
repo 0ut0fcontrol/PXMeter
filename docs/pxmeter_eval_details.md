@@ -262,6 +262,80 @@ alignment.
 After entities are mapped, PXMeter determines how to pair up **chains** within
 those entities.
 
+### 6.0 Intuition: why “aligning chains” is necessary
+
+The key point is that **chain IDs are not guaranteed to be comparable** between
+the reference and the prediction:
+
+- Model chain IDs may be arbitrary (e.g. `A/B` vs `X/Y`).
+- In homomers (multiple copies of the same entity), chain IDs can be *swapped*
+  even when the geometry is correct.
+
+PXMeter therefore treats chain pairing as an **assignment problem**: find the
+reference→model chain mapping that yields the most consistent global alignment
+and the lowest overall RMSD.
+
+The following schematic shows the kind of ambiguity PXMeter resolves:
+
+```
+Reference (ref)                           Model (pred)
+
+Entity E (same sequence, 2 copies)        Entity E (same sequence, 2 copies)
+  chain A    chain B                        chain X    chain Y
+    |          |                              |          |
+    |          |                              |          |
+    +---- correct geometry, but IDs can be permuted ----+
+
+Goal: choose a mapping that makes corresponding chains overlap best
+  e.g. {A -> Y, B -> X} rather than naively matching IDs by name.
+
+Extra constraint (if present): ligand attachment points
+  ref: A has ligand covalently attached at residue 42
+  model: only X has that ligand attached at residue 42
+  => forbid pairing A<->Y, so A must map to X.
+```
+
+At runtime, PXMeter implements this by trying plausible anchor chain pairs,
+superposing the reference onto the model using common atoms on the anchors, and
+then matching the remaining chains within each entity by spatial proximity (via
+linear assignment / Hungarian method), while respecting any forbidden chain
+pairs derived from ligand attachment points.
+
+The overall logic can be summarised as a single flow:
+
+```
+                 ┌───────────────────────────────────────┐
+                 │ Fix one model anchor chain (chosen by │
+                 │ the priorities in 6.2)                │
+                 └───────────────────────────────────────┘
+                                   │
+                                   v
+                 ┌───────────────────────────────────────┐
+                 │ Enumerate compatible reference anchor │
+                 │ chains (same entity, not forbidden)   │
+                 └───────────────────────────────────────┘
+                                   │
+                                   v   (for each ref anchor candidate)
+┌────────────────────────────────────────────────────────────────────────────┐
+│ 1 Find common atoms on the anchor chains -> compute rigid transform T      │
+│ 2 Apply T to *all* reference atoms (superpose ref onto model space)        │
+│ 3 For each entity, build a chain-pair cost matrix                          │
+│    - cost = distance between chain centroids (computed on common atoms)    │
+│    - set cost = +∞ for forbidden ref/model chain pairs (ligand constraints)│
+│ 4 Solve optimal chain pairing with Hungarian (linear assignment)           │
+│ 5 Compute overall RMSD over all matched chain pairs                        │
+└───────────────────────────────────────────────────────────────────────── ──┘
+                                   │
+                                   v
+                 ┌───────────────────────────────────────┐
+                 │ Pick the ref anchor with *lowest*     │
+                 │ overall RMSD                          │
+                 └───────────────────────────────────────┘
+                                   │
+                                   v
+                 Output: final ref_chain -> model_chain mapping
+```
+
 ### 6.1 Using ligand attachment points as constraints
 
 First, PXMeter examines bonds that connect ligand atoms to polymer atoms in

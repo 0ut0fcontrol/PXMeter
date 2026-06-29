@@ -25,7 +25,8 @@ from pxmeter.eval import evaluate, MetricResult
 from pxmeter.input_builder.constants import VALID_INPUT_TYPES, VALID_OUTPUT_TYPES
 from pxmeter.input_builder.gen_input import run_gen_input
 from pxmeter.input_builder.interactive import run_interactive_gen
-from pxmeter.utils import read_chain_id_to_mol_from_json
+from pxmeter.metrics.stereochemistry.check import stereochem_check_to_csv
+from pxmeter.utils import read_chain_id_to_mol_from_json, str_to_none
 
 logging.basicConfig(
     level=logging.INFO,
@@ -160,6 +161,10 @@ def cli(
     Evaluate the performance of a model CIF file by comparing it to a reference CIF file,
     and save the results in a JSON file.
     """
+    # Handle "None" string from CLI
+    ref_assembly_id = str_to_none(ref_assembly_id)
+    interested_lig_label_asym_id = str_to_none(interested_lig_label_asym_id)
+
     if ctx.invoked_subcommand is None:
         if len(sys.argv) == 1:
             click.echo(ctx.get_help())
@@ -183,6 +188,42 @@ def cli(
             chain_id_to_mol_json,
             output_mapped_cif,
         )
+
+
+@cli.command(name="stereocheck")
+@click.option(
+    "-c",
+    "--cif",
+    "cif",
+    type=click.Path(path_type=Path, exists=True),
+    required=True,
+    help="Path to the model CIF file.",
+)
+@click.option(
+    "-o",
+    "--output-csv",
+    "output_csv",
+    type=click.Path(path_type=Path),
+    default=Path("./stereochem_report.csv"),
+    show_default=True,
+    help="Path to the output CSV report.",
+)
+def stereochem_cli(
+    cif: Path,
+    output_csv: Path,
+):
+    """
+    Run stereochemistry checks for a single model CIF and export a CSV report.
+    """
+
+    report_df = stereochem_check_to_csv(
+        model_cif=cif,
+        output_csv=output_csv,
+    )
+    if report_df is None:
+        logging.info("No stereochemistry violations found.")
+    else:
+        logging.info("Output stereochemistry report to %s", output_csv)
 
 
 @cli.group(name="ccd")
@@ -241,7 +282,6 @@ def update():
 @click.option(
     "-p",
     "--pdb-ids",
-    "pdb_ids",
     type=str,
     default=None,
     help=(
@@ -268,7 +308,6 @@ def update():
 @click.option(
     "-a",
     "--assembly-id",
-    "assembly_id",
     type=str,
     default=None,
     help="Assembly ID in the input CIF file. Defaults to None. Ignored for non-CIF input types.",
@@ -279,6 +318,26 @@ def update():
     type=int,
     default=-1,
     help="Number of CPUs to use. Defaults to -1 (all available).",
+)
+@click.option(
+    "--keep_polymer_crosslinks",
+    is_flag=True,
+    help="Keep polymer-polymer crosslinks (e.g. disulfide bonds, cyclic-peptides) in the bonds list.",
+)
+@click.option(
+    "-rm",
+    "--remove-entity-types",
+    type=str,
+    default=None,
+    help=(
+        "Comma-separated list of entity types to remove from the input. "
+        "Choices: ligand, ion, glycan, protein, dna, rna, covalent_ligand."
+    ),
+)
+@click.option(
+    "--reassign-chain-id",
+    is_flag=True,
+    help="Reassign chain IDs, ignoring original ones from the input file.",
 )
 def gen_input_cli(
     input_path: Optional[Path],
@@ -291,10 +350,17 @@ def gen_input_cli(
     assembly_id: Optional[str] = None,
     pdb_ids: Optional[str] = None,
     num_cpu: int = -1,
+    keep_polymer_crosslinks: bool = False,
+    remove_entity_types: Optional[str] = None,
+    reassign_chain_id: bool = False,
 ):
     """
     Generate model inputs.
     """
+    # Handle "None" string from CLI
+    assembly_id = str_to_none(assembly_id)
+    pdb_ids = str_to_none(pdb_ids)
+
     if interactive:
         run_interactive_gen()
         return
@@ -309,6 +375,12 @@ def gen_input_cli(
     else:
         seeds_lst = None
 
+    remove_entity_types_lst = None
+    if remove_entity_types:
+        remove_entity_types_lst = [
+            x.strip().lower() for x in remove_entity_types.split(",") if x.strip()
+        ]
+
     run_gen_input(
         input_path,
         output_path,
@@ -319,4 +391,7 @@ def gen_input_cli(
         assembly_id=assembly_id,
         pdb_ids=pdb_ids,
         num_cpu=num_cpu,
+        keep_polymer_crosslinks=keep_polymer_crosslinks,
+        remove_entity_types=remove_entity_types_lst,
+        use_ori_chain_id=not reassign_chain_id,
     )

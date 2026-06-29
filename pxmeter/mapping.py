@@ -27,6 +27,7 @@ from rdkit.Chem import rdFingerprintGenerator
 from rdkit.DataStructs import TanimotoSimilarity
 
 from pxmeter.configs.run_config import RUN_CONFIG
+from pxmeter.constants import DNA, DNA_RNA_HYBRID, PROTEIN, PROTEIN_D, RNA
 from pxmeter.data.ccd import get_ccd_mol_from_chain_atom_array
 from pxmeter.data.struct import Structure
 from pxmeter.data.utils import (
@@ -275,12 +276,35 @@ class MappingCIF:
         entity_score_dict = {}
         entity_alignments_dict = {}
 
+        # Check if model has PROTEIN_D or DNA_RNA_HYBRID
+        model_entity_types = set(model_struct.entity_poly_type.values())
+        model_has_protein_d = PROTEIN_D in model_entity_types
+        model_has_hybrid = DNA_RNA_HYBRID in model_entity_types
+
         for ref_id, ref_seq in ref_struct.entity_poly_seq.items():
             ref_type = ref_struct.entity_poly_type[ref_id]
             for model_id, model_seq in model_struct.entity_poly_seq.items():
                 model_type = model_struct.entity_poly_type[model_id]
 
-                if model_type != ref_type:
+                # Check if types match or if fallback is allowed
+                is_match = model_type == ref_type
+                if not is_match:
+                    # Protein D fallback: Ref is D, Model is L, and Model has no D
+                    if (
+                        ref_type == PROTEIN_D
+                        and model_type == PROTEIN
+                        and not model_has_protein_d
+                    ):
+                        is_match = True
+                    # Hybrid fallback: Ref is Hybrid, Model is DNA/RNA, and Model has no Hybrid
+                    elif (
+                        ref_type == DNA_RNA_HYBRID
+                        and model_type in (DNA, RNA)
+                        and not model_has_hybrid
+                    ):
+                        is_match = True
+
+                if not is_match:
                     continue
 
                 # Determine sequence type
@@ -984,7 +1008,7 @@ class MappingResult:
     model_struct: Structure
     mapped_ref_struct: Structure
     mapped_model_struct: Structure
-    chain_mapping: dict[str, str]
+    chain_mapping: dict[str, str]  # ref to model
     chain_mapping_anchors: dict[str, str]
     model_to_ref_entity_id: dict[str, str]
 
@@ -1020,7 +1044,7 @@ class MappingResult:
             ref_model (int): Model number for the reference structure. Defaults to 1.
             model_chain_id_to_lig_mol (dict[str, Chem.Mol], optional): Mapping of model chain IDs
                 to ligand molecules. Defaults to None.
-            chain_mapping (dict[str, str], optional): Mapping of model chain IDs to reference chain IDs.
+            chain_mapping (dict[str, str], optional): Mapping of reference chain IDs to model chain IDs.
                             Defaults to None.
             mapping_config (ConfigDict, optional): Configuration for the mapping process.
                             Defaults to RUN_CONFIG.mapping.
@@ -1053,6 +1077,11 @@ class MappingResult:
                 chain_mapping,
                 chain_mapping_anchors,
             ) = chain_perm.get_heurisitic_chain_mapping()
+            if not chain_mapping:
+                raise ValueError(
+                    "Failed to find a valid chain mapping between the reference and model structures. "
+                    "This usually means the model does not match the reference sufficiently."
+                )
         else:
             chain_mapping_anchors = {}
 
@@ -1061,12 +1090,150 @@ class MappingResult:
             chain_perm_model_indices,
         ) = chain_perm.get_permuted_indices(chain_mapping)
 
+        if mapping_config.get("penalize_unmapped_reference_atoms", False):
+            # Include ALL reference atoms, even those from completely unmapped chains
+            ref_all_indices = np.arange(len(map_cif.ref_struct.uni_chain_id))
+            missing_ref_indices = np.setdiff1d(
+                ref_all_indices, chain_perm_ref_indices, assume_unique=True
+            )
+
+            if len(missing_ref_indices) > 0:
+                combined_ref_indices = np.concatenate(
+                    [chain_perm_ref_indices, missing_ref_indices]
+                )
+                combined_model_indices = np.concatenate(
+                    [
+                        chain_perm_model_indices,
+                        np.full(len(missing_ref_indices), -1, dtype=int),
+                    ]
+                )
+                sort_idx = np.argsort(combined_ref_indices)
+                chain_perm_ref_indices = combined_ref_indices[sort_idx]
+                chain_perm_model_indices = combined_model_indices[sort_idx]
+
         chain_permed_ref_struct = map_cif.ref_struct.select_substructure(
             chain_perm_ref_indices
         )
-        chain_permed_model_struct = map_cif.model_struct.select_substructure(
-            chain_perm_model_indices
-        )
+
+        # Build chain_permed_model_struct handling -1
+        valid_model_mask = chain_perm_model_indices != -1
+        if not np.all(valid_model_mask):
+            new_model_array = AtomArray(len(chain_perm_model_indices))
+            for annot in map_cif.model_struct.atom_array.get_annotation_categories():
+                m_dtype = map_cif.model_struct.atom_array.get_annotation(annot).dtype
+                if (
+                    annot
+                    in chain_permed_ref_struct.atom_array.get_annotation_categories()
+                ):
+                    r_dtype = chain_permed_ref_struct.atom_array.get_annotation(
+                        annot
+                    ).dtype
+                    dtype = np.promote_types(m_dtype, r_dtype)
+                else:
+                    dtype = m_dtype
+                padded_annot = np.zeros(len(chain_perm_model_indices), dtype=dtype)
+                padded_annot[
+                    valid_model_mask
+                ] = map_cif.model_struct.atom_array.get_annotation(annot)[
+                    chain_perm_model_indices[valid_model_mask]
+                ]
+                # Fill dummy annotations to match reference
+                # Note: Dummy atoms are primarily intended to be ignored via `valid_mask=False`.
+                # We copy annotations here to prevent downstream filtering logic (which might ignore valid_mask)
+                # from misidentifying dummy atoms.
+                if (
+                    annot
+                    in chain_permed_ref_struct.atom_array.get_annotation_categories()
+                ):
+                    padded_annot[
+                        ~valid_model_mask
+                    ] = chain_permed_ref_struct.atom_array.get_annotation(annot)[
+                        ~valid_model_mask
+                    ]
+                new_model_array.set_annotation(annot, padded_annot)
+
+            new_model_array.coord[:] = 0.0
+            new_model_array.coord[
+                valid_model_mask
+            ] = map_cif.model_struct.atom_array.coord[
+                chain_perm_model_indices[valid_model_mask]
+            ]
+
+            new_uni_chain_id = np.empty(
+                len(chain_perm_model_indices),
+                dtype=np.promote_types(
+                    map_cif.model_struct.uni_chain_id.dtype,
+                    chain_permed_ref_struct.uni_chain_id.dtype,
+                ),
+            )
+            new_uni_chain_id[valid_model_mask] = map_cif.model_struct.uni_chain_id[
+                chain_perm_model_indices[valid_model_mask]
+            ]
+            if chain_mapping:
+                ref_uc_sample = next(iter(chain_mapping.keys()))
+                assert (
+                    ref_uc_sample in map_cif.ref_struct.uni_chain_id
+                ), "chain_mapping must map ref uni_chain_id to model uni_chain_id"
+
+            for i in np.where(~valid_model_mask)[0]:
+                ref_uc = chain_permed_ref_struct.uni_chain_id[i]
+                new_uni_chain_id[i] = chain_mapping.get(ref_uc, ref_uc)
+
+            new_uni_atom_id = np.empty(
+                len(chain_perm_model_indices),
+                dtype=np.promote_types(
+                    map_cif.model_struct.uni_atom_id.dtype,
+                    chain_permed_ref_struct.uni_atom_id.dtype,
+                ),
+            )
+            new_uni_atom_id[valid_model_mask] = map_cif.model_struct.uni_atom_id[
+                chain_perm_model_indices[valid_model_mask]
+            ]
+            new_uni_atom_id[~valid_model_mask] = chain_permed_ref_struct.uni_atom_id[
+                ~valid_model_mask
+            ]
+
+            new_valid_mask = np.zeros(len(chain_perm_model_indices), dtype=bool)
+            new_valid_mask[valid_model_mask] = True
+            if map_cif.model_struct.valid_mask is not None:
+                new_valid_mask[valid_model_mask] &= map_cif.model_struct.valid_mask[
+                    chain_perm_model_indices[valid_model_mask]
+                ]
+
+            if map_cif.model_struct.atom_array.bonds is not None:
+                old_to_new = np.full(
+                    len(map_cif.model_struct.atom_array), -1, dtype=int
+                )
+                old_to_new[chain_perm_model_indices[valid_model_mask]] = np.where(
+                    valid_model_mask
+                )[0]
+
+                old_bonds = map_cif.model_struct.atom_array.bonds.as_array()
+                mask = (old_to_new[old_bonds[:, 0]] != -1) & (
+                    old_to_new[old_bonds[:, 1]] != -1
+                )
+                valid_old_bonds = old_bonds[mask]
+
+                new_bonds = valid_old_bonds.copy()
+                if len(new_bonds) > 0:
+                    new_bonds[:, 0] = old_to_new[valid_old_bonds[:, 0]]
+                    new_bonds[:, 1] = old_to_new[valid_old_bonds[:, 1]]
+
+                new_model_array.bonds = type(map_cif.model_struct.atom_array.bonds)(
+                    len(chain_perm_model_indices), new_bonds
+                )
+
+            chain_permed_model_struct = dataclasses.replace(
+                map_cif.model_struct,
+                atom_array=new_model_array,
+                uni_chain_id=new_uni_chain_id,
+                uni_atom_id=new_uni_atom_id,
+                valid_mask=new_valid_mask,
+            )
+        else:
+            chain_permed_model_struct = map_cif.model_struct.select_substructure(
+                chain_perm_model_indices
+            )
 
         residue_perm = ResiduePermutation(
             chain_permed_ref_struct,

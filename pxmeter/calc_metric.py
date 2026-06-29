@@ -14,28 +14,24 @@
 
 import dataclasses
 import json
-import logging
-import tempfile
+import warnings
 from pathlib import Path
 from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
-from biotite.structure.io import pdb
 from ml_collections.config_dict import ConfigDict
-from posebusters import PoseBusters
-from rdkit import Chem
 
 from pxmeter.configs.run_config import RUN_CONFIG
 from pxmeter.constants import IONS, LIGAND
 from pxmeter.data.ccd import get_ccd_mol_from_chain_atom_array
 from pxmeter.data.struct import Structure
-from pxmeter.metrics.clashes import check_clashes_by_vdw
 from pxmeter.metrics.dockq import compute_dockq
 from pxmeter.metrics.lddt_metrics import LDDT
+from pxmeter.metrics.pb_valid import run_pb_valid
 from pxmeter.metrics.rmsd_metrics import RMSDMetrics
 
-logging.getLogger("posebusters").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", message="The coordinates are missing for some atoms")
 
 
 def compute_pb_valid(
@@ -62,8 +58,6 @@ def compute_pb_valid(
         ref_lig_label_asym_ids = list(ref_lig_label_asym_id)
 
     df_list = []
-    buster = PoseBusters(config="redock")
-
     for lig_label_asym_id in ref_lig_label_asym_ids:
         lig_mask = ref_struct.atom_array.label_asym_id == lig_label_asym_id
 
@@ -76,59 +70,38 @@ def compute_pb_valid(
         model_lig_atom_array.res_name = ref_lig_atom_array.res_name
         model_cond_atom_array = model_struct.atom_array[~lig_mask].copy()
 
-        try:
-            ref_lig_mol = get_ccd_mol_from_chain_atom_array(ref_lig_atom_array)
-            model_lig_mol = get_ccd_mol_from_chain_atom_array(model_lig_atom_array)
-        except Exception:
-            logging.warning(
-                f"Failed to create RDKit molecule for ligand {lig_label_asym_id}. Skipping PoseBusters."
-            )
-            continue
+        if model_struct.valid_mask is not None:
+            model_cond_valid_mask = model_struct.valid_mask[~lig_mask].copy()
+            model_lig_valid_mask = model_struct.valid_mask[lig_mask].copy()
+        else:
+            model_cond_valid_mask = None
+            model_lig_valid_mask = None
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_dir = Path(tmp_dir)
-            ref_lig_sdf = tmp_dir / "tmp_ref_lig.sdf"
-            model_lig_sdf = tmp_dir / "tmp_model_lig.sdf"
-            model_cond_pdb = tmp_dir / "tmp_model_cond.pdb"
+        ref_lig_mol = get_ccd_mol_from_chain_atom_array(ref_lig_atom_array)
+        model_lig_mol = get_ccd_mol_from_chain_atom_array(model_lig_atom_array)
 
-            sdf_writer = Chem.SDWriter(str(ref_lig_sdf))
-            sdf_writer.write(ref_lig_mol)
-            sdf_writer.close()
+        df = run_pb_valid(
+            mol_pred=model_lig_mol,
+            mol_true=ref_lig_mol,
+            mol_cond=model_cond_atom_array,
+            mol_cond_valid_mask=model_cond_valid_mask,
+            mol_pred_valid_mask=model_lig_valid_mask,
+        )
 
-            sdf_writer = Chem.SDWriter(str(model_lig_sdf))
-            sdf_writer.write(model_lig_mol)
-            sdf_writer.close()
-
-            pdb_file = pdb.PDBFile()
-
-            # PDB file only support one letter chain_id, 3 letters res_name, 4 letters atom_name
-            model_cond_atom_array.chain_id = np.array(
-                [i[0] if len(i) > 0 else " " for i in model_cond_atom_array.chain_id],
-                dtype="U1",
-            )
-            model_cond_atom_array.res_name = np.array(
-                [i[:3] for i in model_cond_atom_array.res_name], dtype="U3"
-            )
-            model_cond_atom_array.atom_name = np.array(
-                [i[:4] for i in model_cond_atom_array.atom_name], dtype="U4"
-            )
-            model_cond_atom_array.bonds = None
-
-            pdb_file.set_structure(model_cond_atom_array)
-            pdb_file.write(model_cond_pdb)
-
-            df = buster.bust(
-                mol_pred=model_lig_sdf,
-                mol_true=ref_lig_sdf,
-                mol_cond=model_cond_pdb,
-                full_report=True,
-            )
-            # record ligand chain id
-            df["ref_lig_chain_id"] = ref_lig_chain_id
-            df["model_lig_chain_id"] = model_lig_chain_id
+        # record ligand chain id
+        df["ref_lig_chain_id"] = ref_lig_chain_id
+        df["model_lig_chain_id"] = model_lig_chain_id
+        if not df.empty:
             df_list.append(df)
+    if not df_list:
+        return pd.DataFrame()
 
-    df_cat = pd.concat(df_list)
+    # Avoid FutureWarning in pandas 2.1+ by excluding all-NA columns from entries
+    # and ensuring we only concat non-empty DataFrames.
+    df_list = [d.dropna(axis=1, how="all") for d in df_list if not d.empty]
+    if not df_list:
+        return pd.DataFrame()
+    df_cat = pd.concat(df_list, ignore_index=True)
     return df_cat
 
 
@@ -449,6 +422,120 @@ class MetricResult:
             else:
                 tar_dict[key] = value
 
+    @staticmethod
+    def _calc_stereochecks_summary(
+        atom_mask: np.ndarray,
+        clash_df: pd.DataFrame,
+        bad_bond_df: pd.DataFrame,
+        bad_angle_df: pd.DataFrame,
+    ) -> dict[str, int]:
+        """
+        ggregate stereochemistry violations within an atom subset.
+
+        - `clash_atoms`: number of unique atoms involved in clashes (within subset)
+        - `bad_bonds`: number of bad bonds (within subset)
+        - `bad_angles`: number of bad angles (within subset)
+
+        The `idx*` columns in DataFrames are indices into the mapped atom arrays.
+        """
+
+        atom_mask = np.asarray(atom_mask, dtype=bool)
+
+        clash_atoms = 0
+        if clash_df is not None and (not clash_df.empty):
+            idx1 = clash_df["idx1"].to_numpy(dtype=np.int64, copy=False)
+            idx2 = clash_df["idx2"].to_numpy(dtype=np.int64, copy=False)
+            row_mask = atom_mask[idx1] & atom_mask[idx2]
+            if np.any(row_mask):
+                clash_atoms = int(
+                    np.unique(np.concatenate([idx1[row_mask], idx2[row_mask]])).size
+                )
+
+        bond_cnt = 0
+        if bad_bond_df is not None and (not bad_bond_df.empty):
+            idx1 = bad_bond_df["idx1"].to_numpy(dtype=np.int64, copy=False)
+            idx2 = bad_bond_df["idx2"].to_numpy(dtype=np.int64, copy=False)
+            bond_cnt = int(np.sum(atom_mask[idx1] & atom_mask[idx2]))
+
+        angle_cnt = 0
+        if bad_angle_df is not None and (not bad_angle_df.empty):
+            idx_a = bad_angle_df["idx_a"].to_numpy(dtype=np.int64, copy=False)
+            idx_b = bad_angle_df["idx_b"].to_numpy(dtype=np.int64, copy=False)
+            idx_c = bad_angle_df["idx_c"].to_numpy(dtype=np.int64, copy=False)
+            angle_cnt = int(
+                np.sum(atom_mask[idx_a] & atom_mask[idx_b] & atom_mask[idx_c])
+            )
+
+        return {
+            "clash_atoms": clash_atoms,
+            "bad_bonds": bond_cnt,
+            "bad_angles": angle_cnt,
+        }
+
+    @classmethod
+    def _maybe_add_lddt_stereochecks_summaries(
+        cls,
+        *,
+        lddt_config: ConfigDict,
+        lddt_calculator: LDDT,
+        ref_struct: Structure,
+        chains: list[str],
+        interfaces: list[tuple[str, str]],
+        complex_result_dict: dict[str, Any],
+        chain_result_dict: dict[str, dict[str, Any]],
+        interface_result_dict: dict[tuple[str, str], dict[str, Any]],
+    ) -> None:
+        """Attach stereochemistry violation summaries to output dicts.
+
+        Only active when `metric.lddt.stereochecks=True` and the underlying
+        stereochemistry checker produced violation tables.
+        """
+
+        if not lddt_config.stereochecks:
+            return
+
+        stereo_violation_dfs = getattr(lddt_calculator, "stereo_violation_dfs", None)
+        if stereo_violation_dfs is None:
+            return
+
+        clash_df, bad_bond_df, bad_angle_df = stereo_violation_dfs
+        n_atoms = len(ref_struct.atom_array)
+
+        # Complex-level summary
+        complex_result_dict["stereochecks"] = cls._calc_stereochecks_summary(
+            atom_mask=np.ones(n_atoms, dtype=bool),
+            clash_df=clash_df,
+            bad_bond_df=bad_bond_df,
+            bad_angle_df=bad_angle_df,
+        )
+
+        # Chain-level summary (keyed by reference chain IDs)
+        for chain_id in chains:
+            chain_atom_mask = ref_struct.uni_chain_id == chain_id
+            chain_result_dict.setdefault(chain_id, {})[
+                "stereochecks"
+            ] = cls._calc_stereochecks_summary(
+                atom_mask=chain_atom_mask,
+                clash_df=clash_df,
+                bad_bond_df=bad_bond_df,
+                bad_angle_df=bad_angle_df,
+            )
+
+        # Interface-level summary (keyed by sorted(reference chain IDs))
+        for chain_1, chain_2 in interfaces:
+            interface_key = tuple(sorted((chain_1, chain_2)))
+            interface_atom_mask = (ref_struct.uni_chain_id == chain_1) | (
+                ref_struct.uni_chain_id == chain_2
+            )
+            interface_result_dict.setdefault(interface_key, {})[
+                "stereochecks"
+            ] = cls._calc_stereochecks_summary(
+                atom_mask=interface_atom_mask,
+                clash_df=clash_df,
+                bad_bond_df=bad_bond_df,
+                bad_angle_df=bad_angle_df,
+            )
+
     @classmethod
     def from_struct(
         cls,
@@ -502,16 +589,6 @@ class MetricResult:
         meta_info_dict["ref_to_model_chain_mapping"] = chain_map
         meta_info_dict["ref_chain_info"] = cls._get_chain_info(ref_struct)
 
-        # Calculate clashes
-        if metric_config.calc_clashes:
-            clashes = check_clashes_by_vdw(
-                model_struct.atom_array,
-                vdw_scale_factor=metric_config.clashes.vdw_scale_factor,
-            )
-            complex_result_dict["clashes"] = len(
-                {x for a, b in clashes for x in (a, b)}
-            )
-
         # Calculate RMSD (if ligand and pocket specified in ref_features)
         if metric_config.calc_rmsd and interested_lig_label_asym_id:
             rmsd_metrics = RMSDMetrics(
@@ -537,6 +614,18 @@ class MetricResult:
                 model_struct=model_struct,
                 lddt_config=metric_config.lddt,
             )
+
+            cls._maybe_add_lddt_stereochecks_summaries(
+                lddt_config=metric_config.lddt,
+                lddt_calculator=calc_lddt.lddt_calculator,
+                ref_struct=ref_struct,
+                chains=chains,
+                interfaces=interfaces,
+                complex_result_dict=complex_result_dict,
+                chain_result_dict=chain_result_dict,
+                interface_result_dict=interface_result_dict,
+            )
+
             complex_lddt = calc_lddt.get_complex_lddt()
             if not np.isnan(complex_lddt):
                 complex_result_dict["lddt"] = complex_lddt
@@ -574,6 +663,22 @@ class MetricResult:
                     interface_bb_lddt_dict, interface_result_dict
                 )
 
+            # Calculate LDDT-PLI
+            if interested_lig_label_asym_id and metric_config.lddt.calc_lddt_pli:
+                lig_chain_to_calc = interested_lig_label_asym_id
+                if isinstance(interested_lig_label_asym_id, str):
+                    lig_chain_to_calc = [interested_lig_label_asym_id]
+
+                for lig_chain_id in lig_chain_to_calc:
+                    lddt_pli = calc_lddt.lddt_calculator.calc_lddt_pli(
+                        ref_lig_label_asym_id=lig_chain_id,
+                        inclusion_radius=6.0,
+                    )
+                    if not np.isnan(lddt_pli):
+                        if lig_chain_id not in chain_result_dict:
+                            chain_result_dict[lig_chain_id] = {}
+                        chain_result_dict[lig_chain_id]["lddt_pli"] = lddt_pli
+
         # Calculate DockQ
         if metric_config.calc_dockq:
             dockq_result_dict = compute_dockq(
@@ -595,6 +700,20 @@ class MetricResult:
             chain_pb_valid_dict = cls._post_process_pb_valid(pb_valid_result_df)
         else:
             chain_pb_valid_dict = None
+
+        # Calculate CDR-H3 RMSD
+        if metric_config.calc_cdr_h3_bb_rmsd:
+            from pxmeter.metrics.antibody.cdr_h3_rmsd import calc_cdr_h3_bb_rmsd
+
+            cdr_h3_rmsd_result = calc_cdr_h3_bb_rmsd(
+                ref_struct=ref_struct,
+                model_struct=model_struct,
+            )
+            # update chain_result_dict
+            for chain_id, rmsd_val in cdr_h3_rmsd_result.items():
+                if chain_id not in chain_result_dict:
+                    chain_result_dict[chain_id] = {}
+                chain_result_dict[chain_id]["cdr_h3_bb_rmsd"] = rmsd_val
 
         return cls(
             ref_struct=ref_struct,

@@ -17,8 +17,9 @@ PROTEIN = "polypeptide(L)"
 PROTEIN_D = "polypeptide(D)"
 DNA = "polydeoxyribonucleotide"
 RNA = "polyribonucleotide"
+DNA_RNA_HYBRID = "polydeoxyribonucleotide/polyribonucleotide hybrid"
 LIGAND = "ligand"  # non-polymer
-POLYMER = [PROTEIN, PROTEIN_D, DNA, RNA]
+POLYMER = [PROTEIN, DNA, RNA]
 
 CRYSTALLIZATION_AIDS = (
     "SO4", "GOL", "EDO", "PO4", "ACT", "PEG", "DMS", "TRS", "PGE", "PG4",

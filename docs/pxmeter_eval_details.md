@@ -45,7 +45,9 @@ these stages:
 6. **Package all results** into a structured object (`MetricResult`) which can
    be converted to JSON.
 
-By default, all mapping steps are enabled and all metrics above are computed.
+By default, all mapping steps are enabled. Most metrics are computed, but
+ligand‑specific metrics (pocket RMSD, PoseBusters) are only computed when
+`interested_lig_label_asym_id` is provided.
 
 ---
 
@@ -68,7 +70,9 @@ At runtime the user typically calls `evaluate()` with:
   (pocket RMSD, PoseBusters) are *skipped*.
 - `run_config` (default `RUN_CONFIG`): global configuration object. By default:
   - entity and ligand mapping are enabled,
-  - all metrics (clashes, LDDT, DockQ, RMSD, PoseBusters) are enabled,
+  - metric switches are enabled (clashes, LDDT, DockQ, RMSD, PoseBusters),
+    but RMSD and PoseBusters are only executed when `interested_lig_label_asym_id`
+    is provided,
   - LDDT uses a nucleotide radius of 30 Å and a non‑nucleotide radius of 15 Å,
   - clash detection uses half the sum of van der Waals radii as the clash
     threshold.
@@ -156,9 +160,8 @@ applying the following rules:
 2. **Hydrogen removal (enabled by default)**
    - Atoms whose element is H or D are removed.
 
-3. **Unknown element X removal (enabled by default)**
-   - Entire residues labelled UNX or UNL are examined;
-   - atoms whose element is X in such residues are removed.
+3. **Unknown / placeholder residues removal (enabled by default)**
+   - Entire residues labelled UNX or UNL are removed.
 
 4. **Crystallisation additive removal (enabled by default)**
    - If the experimental methods indicate a crystallographic technique
@@ -169,8 +172,7 @@ applying the following rules:
        accidentally deleting protein chains).
 
 At the end of this step, a new structure is created containing only atoms that
-survived the mask; the “unique chain ID” and “unique atom ID” arrays are
-recomputed accordingly.
+survived the mask.
 
 The net effect is that both reference and model structures are reduced to
 clean, comparable coordinate sets without water, hydrogens, stray X atoms or
@@ -204,6 +206,13 @@ For each polymer entity in the reference:
 
 By default, this entity mapping step is **enabled**.
 
+#### 5.1.1 Entity Type Fallback
+
+When specific entity types are missing in the model, PXMeter allows fallback mapping:
+
+- Ref `PROTEIN_D` → Model `PROTEIN` (if model has no `PROTEIN_D`).
+- Ref `DNA_RNA_HYBRID` → Model `DNA` or `RNA` (if model has no `DNA_RNA_HYBRID`).
+
 ### 5.2 Ligand entities (non‑polymers)
 
 Ligand mapping is done in two passes:
@@ -228,8 +237,10 @@ Ligand mapping is done in two passes:
    - For each model/reference ligand pair, a Morgan fingerprint is computed
      (radius = 2, size = 2048, with chirality), and Tanimoto similarity is
      measured.
-   - Pairs are sorted by similarity and greedily assigned until there are no
-     high‑similarity pairs left.
+   - Pairs are sorted by similarity and tried greedily.
+   - Note: the current implementation does not enforce an explicit similarity
+     threshold; whether a pair is accepted also depends on whether a consistent
+     atom‑level graph match can be found.
 
 By default, ligand mapping is **enabled**.
 
@@ -656,11 +667,23 @@ complementing the all‑atom LDDT that also reflects side‑chain quality.
 
 When `metric.lddt.calc_backbone_lddt` is enabled, PXMeter first builds a backbone atom mask on the reference structure (for example, representative main‑chain atoms in each polymer residue) and computes LDDT using only distances between these backbone atoms.
 
-If `metric.lddt.stereochecks` is also set to `True`, only backbone atoms that pass stereochemical validation are allowed to contribute to backbone‑only LDDT; residues whose backbone atoms fail the checks are effectively excluded. Chains or interfaces with no valid backbone atom pairs simply do not get a backbone‑only LDDT value in the results.
+If `metric.lddt.stereochecks` is also set to `True`, backbone‑only LDDT still evaluates over backbone atom pairs, but pairs touching stereochemically invalid backbone atoms contribute zero (they are not dropped from the averaging). If a chain/interface has no backbone atom pairs at all (e.g. too few atoms after filtering), the backbone‑only LDDT entry may be omitted from results.
+
+### 8.3.5 LDDT-PLI
+
+`LDDT-PLI` measures the local distance agreement between the ligand and its binding pocket.
+
+- **Binding Pocket Definition**: The binding pocket is defined as the set of all polymer residues (protein or nucleic acid) in the reference structure that have at least one atom within a specified inclusion radius (default **6.0 Å**) of any ligand atom.
+- **Atom Pair Selection**: The calculation considers atom pairs between the **ligand** and the **binding pocket**, subject to two constraints:
+  1. One atom must belong to the ligand, and the other to the binding pocket.
+  2. The distance between the atoms in the reference structure must be less than the inclusion radius (default **6.0 Å**).
+- **Scoring**: Standard LDDT thresholds (0.5, 1.0, 2.0, 4.0 Å) are used to compute the score based on these selected pairs.
 
 ### 8.4 DockQ (interface quality)
 
-DockQ provides an alternative, interface‑centric quality measure. PXMeter uses a native implementation that follows the official DockQ metric definitions.
+DockQ provides an alternative, interface‑centric quality measure. PXMeter uses a native implementation that follows the official DockQ *formulae*.
+
+Note: residue pairing differs from the official DockQ pipeline. In PXMeter, residues are paired by `(res_id, res_name)` after the upstream mapping/permutation steps, rather than by an explicit sequence alignment.
 
 Runtime behaviour (default):
 
@@ -674,29 +697,62 @@ Runtime behaviour (default):
 
 This gives a complementary, widely‑used view of interface quality.
 
-### 8.5 PoseBusters validity (ligand redocking quality)
+### 8.5 PoseBusters validity (re-implemented)
 
 This metric is only computed if **both**:
 
 - `calc_pb_valid` is `True` in the config (default), and
 - `interested_lig_label_asym_id` is provided.
 
+**Note**: PXMeter now uses an internal Python-only implementation (`pxmeter/metrics/pb_valid`) that replicates the key validity checks of the PoseBusters suite using RDKit and Biotite. It no longer requires an external PoseBusters executable.
+
 For each selected ligand:
 
-1. The ligand atoms are extracted from both reference and model structures and
-   converted to RDKit `Mol` objects (using CCD chemistry where possible).
-2. The surrounding protein environment in the *model* (all non‑ligand atoms)
-   is written as a PDB file.
-3. The PoseBusters tool is run in “redock” mode, comparing:
-   - the predicted ligand conformation (`mol_pred`),
-   - the true ligand conformation (`mol_true`),
-   - the model environment (`mol_cond`).
-4. PoseBusters returns a tabular report with many checks: clashes, torsion
-   outliers, ring strain, etc.
-5. PXMeter adds chain IDs for the ligand in reference and model and stores the
-   PoseBusters report under the corresponding reference ligand chain ID.
+1. **Structure preparation**:
+   - The predicted ligand is converted to an RDKit molecule (with 3D-based stereo-perception).
+   - The reference ligand is also converted to RDKit for identity comparison.
+   - The surrounding environment (protein, cofactors, water) is extracted from the model structure.
 
-This results in a per‑ligand diagnostic of small‑molecule pose quality.
+2. **Metric computation**:
+   PXMeter runs a battery of checks directly in memory:
+   - **Chemistry**: Sanitization, radicals, connectivity, and identity consistency (formula, bonds, stereochemistry) against the reference.
+   - **Geometry**: Bond lengths, bond angles, internal steric clashes, and flatness of aromatic rings/double bonds.
+   - **Energy**: Internal energy ratio using the UFF force field.
+   - **Intermolecular interactions**: Minimal distances and volume overlaps between the ligand and the protein, organic/inorganic cofactors, and waters.
+   - **RMSD**: Standard RMSD, symmetry-corrected (Kabsch) RMSD, and centroid distances.
+
+3. **Output**:
+   - A tabular report (DataFrame) containing pass/fail status and values for each check is generated.
+   - This report is stored under the corresponding reference ligand chain ID.
+
+This provides a fast, dependency-light assessment of physical plausibility and chemical correctness, matching the logic of the original PoseBusters tool.
+
+### 8.6 Framework-aligned CDR-H3 loop backbone RMSD
+
+This metric is designed specifically for antibody heavy chains to evaluate the structural accuracy of the hypervariable CDR‑H3 loop, which is critical for antigen binding. It is computed when `calc_cdr_h3_bb_rmsd` is enabled in the configuration.
+
+Runtime behaviour:
+
+1. **Identify protein chains**: PXMeter iterates over all unique protein entities in the reference structure.
+2. **Sequence annotation (Batch)**:
+   - Unique sequences are extracted from the reference protein entities.
+   - These sequences are annotated in batch using **ANARCII** (LM).
+   - The annotation identifies the chain type (Heavy, Light, etc.) and delineates the variable regions (FR1, CDR1, FR2, CDR2, FR3, CDR3, FR4) according to the **IMGT** numbering scheme.
+   - Using `seq_type="unknown"` ensures that T‑cell receptor (TCR) chains are not misclassified as antibody heavy chains by ANARCII.
+3. **Per-chain calculation**:
+   - The algorithm iterates through each protein chain in the reference.
+   - If a chain is identified as a **Heavy chain** and contains a **CDR3** region, it proceeds to calculation.
+4. **Feature extraction**:
+   - **All atoms** (specifically heavy atoms, as hydrogens are removed during cleaning) are extracted from both the reference and the mapped model structure.
+   - The residue IDs of these atoms are mapped to the IMGT regions identified in the annotation step.
+5. **Alignment and RMSD**:
+   - **Alignment**: The model chain is superimposed onto the reference chain using the backbone atoms (N, C, CA, O) of the framework regions (**FR1, FR2, FR3, FR4**). This minimizes the RMSD of the stable framework.
+   - **RMSD calculation**: After alignment, the RMSD is computed for **backbone atoms (N, C, CA, O)** of the **CDR-H3** loop.
+6. **Reporting**:
+   - The resulting CDR‑H3 RMSD value is recorded for the corresponding chain in the metric results.
+   - If a chain is not a heavy chain or lacks a CDR3 loop, this metric is skipped for that chain.
+
+This approach ensures that the loop accuracy is measured relative to a correctly oriented framework, providing a biologically meaningful assessment of antibody modeling performance.
 
 ---
 
